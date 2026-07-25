@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "next-devtools": {
+      "command": "/Users/femama/.volta/bin/npx",
+      "args": ["-y", "next-devtools-mcp@latest"]
+    },
+    "playwright": {
+      "command": "/Users/femama/.volta/bin/npx",
+      "args": [
+        "@playwright/mcp@latest"
+      ]
+    }
+  }
+}
