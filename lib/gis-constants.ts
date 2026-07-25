@@ -20,3 +20,6 @@ export const PLAY_PREFETCH_TILE_CONCURRENCY = 8;
 
 // Some PMTiles archives are indexed using TMS-style Y ordering.
 export const LANDCOVER_FLIP_Y = false;
+
+// Allow a limited number of overzoom levels before hiding landcover tiles.
+export const LANDCOVER_MAX_OVERZOOM_DELTA = 10;

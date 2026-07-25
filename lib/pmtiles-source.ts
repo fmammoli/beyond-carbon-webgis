@@ -6,6 +6,7 @@ import {
   LANDCOVER_FLIP_Y,
   LANDCOVER_FILE_PREFIX,
   LANDCOVER_FILE_SUFFIX,
+  LANDCOVER_MAX_OVERZOOM_DELTA,
   MAX_YEAR,
   MIN_YEAR,
 } from "@/lib/gis-constants";
@@ -16,6 +17,8 @@ export type PmtilesRenderMode = "classified" | "raw-codes";
 const EMPTY_TILE_DATA_URI =
   "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
 const BLACK_TRANSPARENCY_THRESHOLD = 8;
+const WHITE_TRANSPARENCY_THRESHOLD = 247;
+const TRANSPARENT_CLASS_IDS = new Set([0, 27, 255]);
 const SORTED_CLASS_IDS = Object.keys(MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP)
   .map((value) => Number(value))
   .sort((a, b) => a - b);
@@ -136,8 +139,13 @@ function clampTileRequestToZoomRange(
   x: number,
   y: number,
   zoomRange: PmtilesZoomRange | null,
-): { z: number; x: number; y: number } {
+): { z: number; x: number; y: number } | null {
   if (!zoomRange) {
+    const maxIndex = Math.pow(2, z) - 1;
+    if (x < 0 || y < 0 || x > maxIndex || y > maxIndex) {
+      return null;
+    }
+
     return { z, x, y };
   }
 
@@ -157,6 +165,11 @@ function clampTileRequestToZoomRange(
     targetZ = zoomRange.minZoom;
     targetX = targetX << delta;
     targetY = targetY << delta;
+  }
+
+  const maxIndex = Math.pow(2, targetZ) - 1;
+  if (targetX < 0 || targetY < 0 || targetX > maxIndex || targetY > maxIndex) {
+    return null;
   }
 
   return { z: targetZ, x: targetX, y: targetY };
@@ -196,6 +209,11 @@ function parsePseudoUrl(pseudoUrl: string): { year: number; z: number; x: number
 async function createStyledTileObjectUrl(
   blob: Blob,
   renderMode: PmtilesRenderMode,
+  overzoomCrop?: {
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+  },
 ): Promise<string> {
   const bitmap = await createImageBitmap(blob);
   const canvas = document.createElement("canvas");
@@ -208,7 +226,28 @@ async function createStyledTileObjectUrl(
     throw new Error("Canvas 2D context is unavailable");
   }
 
-  context.drawImage(bitmap, 0, 0);
+  if (overzoomCrop && overzoomCrop.scale > 1) {
+    const sourceWidth = Math.max(1, Math.floor(bitmap.width / overzoomCrop.scale));
+    const sourceHeight = Math.max(1, Math.floor(bitmap.height / overzoomCrop.scale));
+    const sourceX = Math.min(bitmap.width - sourceWidth, overzoomCrop.offsetX * sourceWidth);
+    const sourceY = Math.min(bitmap.height - sourceHeight, overzoomCrop.offsetY * sourceHeight);
+
+    context.imageSmoothingEnabled = false;
+    context.drawImage(
+      bitmap,
+      sourceX,
+      sourceY,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
+  } else {
+    context.drawImage(bitmap, 0, 0);
+  }
+
   bitmap.close();
 
   const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
@@ -261,6 +300,15 @@ async function createStyledTileObjectUrl(
     const green = pixels[index + 1];
     const blue = pixels[index + 2];
 
+    if (
+      red >= WHITE_TRANSPARENCY_THRESHOLD &&
+      green >= WHITE_TRANSPARENCY_THRESHOLD &&
+      blue >= WHITE_TRANSPARENCY_THRESHOLD
+    ) {
+      pixels[index + 3] = 0;
+      continue;
+    }
+
     if (canDecodeClasses && renderMode === "raw-codes") {
       // Preserve encoded class values directly as grayscale for QA.
       pixels[index] = red;
@@ -279,16 +327,21 @@ async function createStyledTileObjectUrl(
       continue;
     }
 
-      if (canDecodeClasses) {
-        if (red < MIN_CLASS_ID || red > MAX_CLASS_ID) {
-          // Avoid painting carrier/no-data values (e.g. 0,127,0) as valid classes.
-          pixels[index + 3] = 0;
-          continue;
-        }
+    if (canDecodeClasses) {
+      if (TRANSPARENT_CLASS_IDS.has(red)) {
+        pixels[index + 3] = 0;
+        continue;
+      }
 
-        const nearestClassId = getNearestKnownClassId(red);
-        const mappedColor =
-          nearestClassId !== null ? MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP[nearestClassId] : undefined;
+      if (red < MIN_CLASS_ID || red > MAX_CLASS_ID) {
+        // Avoid painting carrier/no-data values (e.g. 0,127,0) as valid classes.
+        pixels[index + 3] = 0;
+        continue;
+      }
+
+      const nearestClassId = getNearestKnownClassId(red);
+      const mappedColor =
+        nearestClassId !== null ? MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP[nearestClassId] : undefined;
 
       if (mappedColor) {
         pixels[index] = mappedColor[0];
@@ -325,6 +378,8 @@ export function createPmtilesXyzSource(
 
   return new XYZ({
     crossOrigin: "anonymous",
+    transition: 0,
+    wrapX: false,
     tileUrlFunction: (tileCoord) => {
       if (!tileCoord) {
         return EMPTY_TILE_DATA_URI;
@@ -353,12 +408,24 @@ export function createPmtilesXyzSource(
       try {
         const archive = getArchive(baseUrl, parsed.year);
         const zoomRange = await getArchiveHeader(baseUrl, parsed.year);
+
+        if (zoomRange && parsed.z > zoomRange.maxZoom + LANDCOVER_MAX_OVERZOOM_DELTA) {
+          image.src = EMPTY_TILE_DATA_URI;
+          return;
+        }
+
         const clampedTile = clampTileRequestToZoomRange(
           parsed.z,
           parsed.x,
           parsed.y,
           zoomRange,
         );
+
+        if (!clampedTile) {
+          image.src = EMPTY_TILE_DATA_URI;
+          return;
+        }
+
         const tilePayload = await archive.getZxy(clampedTile.z, clampedTile.x, clampedTile.y);
 
         const activeRequestId = (imageTile as ImageTile & { __requestId?: number }).__requestId;
@@ -380,8 +447,19 @@ export function createPmtilesXyzSource(
         const fallbackObjectUrl = URL.createObjectURL(blob);
         let objectUrl = fallbackObjectUrl;
 
+        const overzoomDelta = Math.max(0, parsed.z - clampedTile.z);
+        const overzoomScale = Math.pow(2, overzoomDelta);
+        const overzoomOffsetX =
+          overzoomDelta > 0 ? ((parsed.x % overzoomScale) + overzoomScale) % overzoomScale : 0;
+        const overzoomOffsetY =
+          overzoomDelta > 0 ? ((parsed.y % overzoomScale) + overzoomScale) % overzoomScale : 0;
+
         try {
-          objectUrl = await createStyledTileObjectUrl(blob, renderMode);
+          objectUrl = await createStyledTileObjectUrl(blob, renderMode, {
+            scale: overzoomScale,
+            offsetX: overzoomOffsetX,
+            offsetY: overzoomOffsetY,
+          });
           URL.revokeObjectURL(fallbackObjectUrl);
         } catch {
           // If image processing fails, fall back to the original tile payload.
@@ -466,6 +544,10 @@ async function prefetchSinglePmtilesTile(
     const zoomRange = await getArchiveHeader(normalizedBaseUrl, year);
     const tileY = maybeFlipY(z, y);
     const clampedTile = clampTileRequestToZoomRange(z, x, tileY, zoomRange);
+
+    if (!clampedTile) {
+      return;
+    }
 
     await archive.getZxy(clampedTile.z, clampedTile.x, clampedTile.y);
   })()

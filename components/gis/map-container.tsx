@@ -105,7 +105,8 @@ export default function MapContainer() {
   const [showLandcoverCodes, setShowLandcoverCodes] = useState(false);
   const [landcoverOpacity, setLandcoverOpacity] = useState(DEFAULT_LANDCOVER_OPACITY);
   const [isSatelliteVisible, setIsSatelliteVisible] = useState(true);
-  const [isLegendOpen, setIsLegendOpen] = useState(true);
+  const [isBoundariesAndPlacesVisible, setIsBoundariesAndPlacesVisible] = useState(true);
+  const [isLegendOpen, setIsLegendOpen] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isFrameLoading, setIsFrameLoading] = useState(false);
   const [isPreloadingYears, setIsPreloadingYears] = useState(false);
@@ -313,7 +314,11 @@ export default function MapContainer() {
 
   return (
     <section className="relative h-[100dvh] w-full overflow-hidden bg-gradient-to-br from-cyan-50 via-sky-100 to-blue-200 text-foreground">
-      <MapCanvas satelliteVisible={isSatelliteVisible} onReady={onMapReady} />
+      <MapCanvas
+        satelliteVisible={isSatelliteVisible}
+        boundariesAndPlacesVisible={isBoundariesAndPlacesVisible}
+        onReady={onMapReady}
+      />
 
       {!missingPmtilesUrl ? (
         <PmtilesLayer
@@ -334,10 +339,12 @@ export default function MapContainer() {
         <div className="pointer-events-auto absolute left-3 top-3 md:left-5 md:top-5">
           <MapControls
             isSatelliteVisible={isSatelliteVisible}
+            isBoundariesAndPlacesVisible={isBoundariesAndPlacesVisible}
             isLandcoverVisible={isLandcoverVisible}
             showLandcoverCodes={showLandcoverCodes}
             landcoverOpacity={landcoverOpacity}
             onSatelliteChange={setIsSatelliteVisible}
+            onBoundariesAndPlacesChange={setIsBoundariesAndPlacesVisible}
             onLandcoverChange={setIsLandcoverVisible}
             onShowLandcoverCodesChange={setShowLandcoverCodes}
             onLandcoverOpacityChange={setLandcoverOpacity}
@@ -356,6 +363,7 @@ export default function MapContainer() {
               maxYear={MAX_YEAR}
               isPlaying={isPlaying}
               canAdvance={!isFrameLoading}
+              isFrameLoading={isFrameLoading}
               isPreloadingYears={isPreloadingYears}
               onYearChange={setYear}
               onPlayingChange={setIsPlaying}

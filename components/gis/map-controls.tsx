@@ -1,6 +1,6 @@
 "use client";
 
-import { Layers, Satellite } from "lucide-react";
+import { Layers, MapPinned, Satellite } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
@@ -8,10 +8,12 @@ import { Switch } from "@/components/ui/switch";
 
 type MapControlsProps = {
   isSatelliteVisible: boolean;
+  isBoundariesAndPlacesVisible: boolean;
   isLandcoverVisible: boolean;
   showLandcoverCodes: boolean;
   landcoverOpacity: number;
   onSatelliteChange: (visible: boolean) => void;
+  onBoundariesAndPlacesChange: (visible: boolean) => void;
   onLandcoverChange: (visible: boolean) => void;
   onShowLandcoverCodesChange: (show: boolean) => void;
   onLandcoverOpacityChange: (opacity: number) => void;
@@ -19,10 +21,12 @@ type MapControlsProps = {
 
 export function MapControls({
   isSatelliteVisible,
+  isBoundariesAndPlacesVisible,
   isLandcoverVisible,
   showLandcoverCodes,
   landcoverOpacity,
   onSatelliteChange,
+  onBoundariesAndPlacesChange,
   onLandcoverChange,
   onShowLandcoverCodesChange,
   onLandcoverOpacityChange,
@@ -47,6 +51,17 @@ export function MapControls({
             checked={isSatelliteVisible}
             onCheckedChange={onSatelliteChange}
             aria-label="Toggle satellite basemap"
+          />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm">
+            <MapPinned className="size-4" />
+            <span>Place Labels & Borders</span>
+          </div>
+          <Switch
+            checked={isBoundariesAndPlacesVisible}
+            onCheckedChange={onBoundariesAndPlacesChange}
+            aria-label="Toggle country borders and place labels"
           />
         </div>
         <div className="flex items-center justify-between gap-3">

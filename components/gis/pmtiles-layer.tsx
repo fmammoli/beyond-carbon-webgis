@@ -118,7 +118,8 @@ export function PmtilesLayer({
     const stagingLayer = new TileLayer({
       source,
       visible,
-      opacity,
+      // Keep incoming frame fully hidden until it is ready to avoid dark fade artifacts.
+      opacity: 0,
       zIndex: 11,
     });
 
@@ -153,6 +154,7 @@ export function PmtilesLayer({
         return;
       }
 
+      currentStagingLayer.setOpacity(opacity);
       currentStagingLayer.setZIndex(10);
       activeLayerRef.current = currentStagingLayer;
       stagingLayerRef.current = null;
@@ -229,7 +231,11 @@ export function PmtilesLayer({
 
   useEffect(() => {
     activeLayerRef.current?.setOpacity(opacity);
-    stagingLayerRef.current?.setOpacity(opacity);
+
+    // Staging layer stays hidden while preloading; it is revealed only on finalized swap.
+    if (stagingLayerRef.current) {
+      stagingLayerRef.current.setOpacity(0);
+    }
   }, [opacity]);
 
   return null;

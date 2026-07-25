@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { ChevronDown, ListTree } from "lucide-react";
 
 import { MAPBIOMAS_CLASSES } from "@/lib/mapbiomas-colors";
@@ -17,13 +17,30 @@ type LegendProps = {
   onOpenChange: (open: boolean) => void;
 };
 
-const TOP_LEVEL_LABELS: Record<string, string> = {
-  "1": "Forest",
-  "2": "Natural Vegetation",
-  "3": "Agriculture",
-  "4": "Non-Vegetation",
-  "5": "Water",
-  "6": "Not Observed",
+const TOP_LEVEL_LABELS: Record<string, { en: string; id: string }> = {
+  "1": { en: "Forest", id: "Hutan" },
+  "2": { en: "Natural Vegetation", id: "Vegetasi Alami" },
+  "3": { en: "Agriculture", id: "Pertanian" },
+  "4": { en: "Non-Vegetation", id: "Non-Vegetasi" },
+  "5": { en: "Water", id: "Perairan" },
+  "6": { en: "Not Observed", id: "Tidak Teramati" },
+};
+
+const CLASS_LABEL_TRANSLATIONS_ID: Record<string, string> = {
+  "Forest Formation": "Formasi Hutan",
+  Mangrove: "Mangrove",
+  "Peat Swamp Forest": "Hutan Rawa Gambut",
+  "Non-Forest Natural Vegetation": "Vegetasi Alami Non-Hutan",
+  "Rice Paddy": "Sawah",
+  "Oil Palm": "Kelapa Sawit",
+  "Pulpwood Plantation": "Hutan Tanaman Industri",
+  "Other Agriculture": "Pertanian Lainnya",
+  "Mining Pit": "Area Tambang",
+  "Urban Area": "Kawasan Perkotaan",
+  "Other Non-Vegetation": "Non-Vegetasi Lainnya",
+  Aquaculture: "Akuakultur",
+  "River, Lake, Ocean": "Sungai, Danau, Laut",
+  "Not Observed / Clouds": "Tidak Teramati / Awan",
 };
 
 function getTopLevelKey(label: string): string {
@@ -39,15 +56,17 @@ function getCompactLabel(label: string): string {
   return label.replace(/^\d+\.\d+\s*/, "");
 }
 
-export function Legend({ open, onOpenChange }: LegendProps) {
-  const [compactMode, setCompactMode] = useState(true);
+function getIndonesianLabel(englishLabel: string): string {
+  return CLASS_LABEL_TRANSLATIONS_ID[englishLabel] ?? englishLabel;
+}
 
+export function Legend({ open, onOpenChange }: LegendProps) {
   const groupedClasses = useMemo(() => {
     const grouped = new Map<
       string,
       {
         key: string;
-        title: string;
+        title: { en: string; id: string };
         items: typeof MAPBIOMAS_CLASSES;
       }
     >();
@@ -63,7 +82,7 @@ export function Legend({ open, onOpenChange }: LegendProps) {
 
       grouped.set(key, {
         key,
-        title: TOP_LEVEL_LABELS[key] ?? "Other",
+        title: TOP_LEVEL_LABELS[key] ?? { en: "Other", id: "Lainnya" },
         items: [item],
       });
     });
@@ -87,77 +106,56 @@ export function Legend({ open, onOpenChange }: LegendProps) {
 
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
-      <Card className="w-[min(92vw,22rem)] border-white/30 bg-card/90 shadow-lg backdrop-blur-sm">
-        <CardHeader className="pb-2">
+      <Card className="w-[min(68vw,15rem)] border-white/30 bg-card/90 shadow-lg backdrop-blur-sm">
+        <CardHeader className="pb-1.5 pt-3">
           <div className="flex items-center justify-between gap-3">
-            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-              <ListTree className="size-4" />
+            <CardTitle className="flex items-center gap-1.5 text-xs font-semibold">
+              <ListTree className="size-3.5" />
               Landcover Legend
             </CardTitle>
             <CollapsibleTrigger
               render={
-                <Button size="icon" variant="outline" aria-label="Toggle legend" />
+                <Button size="icon" variant="outline" aria-label="Toggle legend" className="size-7" />
               }
             >
               <ChevronDown
-                className={`size-4 transition-transform ${open ? "rotate-180" : "rotate-0"}`}
+                className={`size-3.5 transition-transform ${open ? "rotate-180" : "rotate-0"}`}
               />
             </CollapsibleTrigger>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              size="xs"
-              variant={compactMode ? "default" : "outline"}
-              onClick={() => setCompactMode(true)}
-            >
-              Compact
-            </Button>
-            <Button
-              size="xs"
-              variant={compactMode ? "outline" : "default"}
-              onClick={() => setCompactMode(false)}
-            >
-              Full
-            </Button>
-          </div>
         </CardHeader>
         <CollapsibleContent>
-          <CardContent className="max-h-72 space-y-2 overflow-y-auto pr-3">
-            {compactMode
-              ? groupedClasses.map((group) => (
-                  <div key={group.key} className="rounded-lg border border-border/60 p-2">
-                    <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
-                      <span className="font-semibold text-foreground">
-                        {group.key}.x {group.title}
+          <CardContent className="max-h-60 space-y-1.5 overflow-y-auto pb-3 pr-2.5">
+            {groupedClasses.map((group) => (
+              <div key={group.key} className="rounded-md border border-border/60 p-1.5">
+                <div className="mb-1 flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span className="leading-tight">
+                    <span className="block font-semibold text-foreground">
+                      {group.key}.x {group.title.en}
+                    </span>
+                    <span className="block text-[9px]">{group.title.id}</span>
+                  </span>
+                  <span>{group.items.length} classes</span>
+                </div>
+                <div className="space-y-1.5">
+                  {group.items.map((item) => (
+                    <div key={item.id} className="flex items-start gap-1.5 text-[11px] leading-tight">
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-xs ring-1 ring-black/20"
+                        style={{ backgroundColor: item.color }}
+                      />
+                      <span className="font-mono text-[10px] text-muted-foreground">{item.id}</span>
+                      <span className="min-w-0 leading-tight">
+                        <span className="block truncate">{getCompactLabel(item.label)}</span>
+                        <span className="block truncate text-[10px] text-muted-foreground">
+                          {getIndonesianLabel(getCompactLabel(item.label))}
+                        </span>
                       </span>
-                      <span>{group.items.length} classes</span>
                     </div>
-                    <div className="space-y-1">
-                      {group.items.map((item) => (
-                        <div key={item.id} className="flex items-center gap-2 text-xs">
-                          <span
-                            className="h-3 w-3 shrink-0 rounded-xs ring-1 ring-black/20"
-                            style={{ backgroundColor: item.color }}
-                          />
-                          <span className="font-mono text-[11px] text-muted-foreground">
-                            {item.id}
-                          </span>
-                          <span className="truncate">{getCompactLabel(item.label)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              : MAPBIOMAS_CLASSES.map((item) => (
-                  <div key={item.id} className="flex items-center gap-2 text-xs">
-                    <span
-                      className="h-3 w-3 shrink-0 rounded-xs ring-1 ring-black/20"
-                      style={{ backgroundColor: item.color }}
-                    />
-                    <span className="font-mono text-[11px] text-muted-foreground">{item.id}</span>
-                    <span className="truncate">{item.label}</span>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              </div>
+            ))}
           </CardContent>
         </CollapsibleContent>
       </Card>
