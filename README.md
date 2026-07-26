@@ -56,6 +56,13 @@ npm run build
 - Uploaded features are rendered in an OpenLayers vector layer above the landcover raster.
 - The map automatically fits to the dropped feature extent.
 
+## Canopy Extraction API
+
+- Set `CANOPY_API_KEY` on the Next.js server and `CANOPY_API_URL` if the FastAPI upstream is not `http://127.0.0.1:8000/api/v1/chm/crop`.
+- Put those values in `.env.local`, then restart `npm run dev` so Next.js reloads them.
+- The client sends `geojson` to `/api/canopy/extract`; the route proxies it upstream with `X-API-Key`.
+- The browser downloads streamed GeoTIFF responses as `.tif` files.
+
 ## PMTiles / R2 Requirements
 
 - Ensure CORS allows your app origin.

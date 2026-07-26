@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type Map from "ol/Map";
 import type MapBrowserEvent from "ol/MapBrowserEvent";
 import type TileLayer from "ol/layer/Tile";
+import type WebGLTile from "ol/layer/WebGLTile";
 import XYZ from "ol/source/XYZ";
+import { getView, withHigherResolutions, withExtentCenter } from "ol/View";
 import "ol/ol.css";
 
 import {
@@ -17,6 +19,7 @@ import {
   PLAY_PREFETCH_TILE_CONCURRENCY,
   PLAY_PREFETCH_YEAR_WINDOW,
 } from "@/lib/gis-constants";
+import { createGeoTIFFLayer } from "@/lib/geotiff-layer";
 import { Legend } from "@/components/gis/legend";
 import { MapCanvas, type MapCanvasReadyPayload } from "@/components/gis/map-canvas";
 import { MapControls } from "@/components/gis/map-controls";
@@ -121,6 +124,9 @@ export default function MapContainer() {
   const [mapContext, setMapContext] = useState<MapContextState>({
     map: null,
   });
+  const [canopyLayers, setCanopyLayers] = useState<Record<string, { tileUrls: string[]; isLoading: boolean; isVisible: boolean; layers?: WebGLTile[] }>>(
+    {},
+  );
   const hasPrefetchedAllYearsRef = useRef(false);
 
   const pmtilesBaseUrl =
@@ -130,6 +136,59 @@ export default function MapContainer() {
   const onMapReady = useCallback((payload: MapCanvasReadyPayload) => {
     setMapContext({
       map: payload.map,
+    });
+  }, []);
+
+  const onCanopyExtractionStart = useCallback((fileName: string) => {
+    setCanopyLayers((prev) => ({
+      ...prev,
+      [fileName]: {
+        tileUrls: [],
+        isLoading: true,
+        isVisible: true,
+      },
+    }));
+    setStatusMessage(`Loading canopy tiles for ${fileName}...`);
+  }, []);
+
+  const onCanopyExtractionComplete = useCallback((fileName: string, tileUrls: string[]) => {
+    setCanopyLayers((prev) => ({
+      ...prev,
+      [fileName]: {
+        tileUrls,
+        isLoading: false,
+        isVisible: true,
+      },
+    }));
+
+    setStatusMessage(`Loaded ${tileUrls.length} canopy tile${tileUrls.length !== 1 ? "s" : ""} for ${fileName}.`);
+  }, []);
+
+  const onCanopyExtractionError = useCallback((fileName: string, error: string) => {
+    setCanopyLayers((prev) => {
+      const updated = { ...prev };
+      delete updated[fileName];
+      return updated;
+    });
+    setStatusMessage(`Canopy extraction failed for ${fileName}: ${error}`);
+  }, []);
+
+  const onCanopyLayerVisibilityChange = useCallback((fileName: string, isVisible: boolean) => {
+    setCanopyLayers((prev) => {
+      const existing = prev[fileName];
+      if (!existing) return prev;
+      
+      // Update visibility on all layers immediately
+      if (existing.layers) {
+        for (const layer of existing.layers) {
+          layer.setVisible(isVisible);
+        }
+      }
+      
+      return {
+        ...prev,
+        [fileName]: { ...existing, isVisible },
+      };
     });
   }, []);
 
@@ -233,6 +292,88 @@ export default function MapContainer() {
     pmtilesBaseUrl,
     year,
   ]);
+
+  // Handle creating and adding GeoTIFF layers to the map
+  useEffect(() => {
+    if (!mapContext.map) {
+      return;
+    }
+
+    const createAndAddLayers = async () => {
+      for (const [fileName, layerData] of Object.entries(canopyLayers)) {
+        // If layers already exist, just update visibility
+        if (layerData.layers && layerData.layers.length > 0) {
+          for (const layer of layerData.layers) {
+            layer.setVisible(layerData.isVisible);
+          }
+          continue;
+        }
+
+        // If still loading or no URLs, skip
+        if (layerData.isLoading || layerData.tileUrls.length === 0) {
+          continue;
+        }
+
+        // Create a layer for each tile URL
+        const createdLayers: WebGLTile[] = [];
+        let shouldUpdateView = true; // Update view only for the first layer
+        
+        for (const tileUrl of layerData.tileUrls) {
+          console.log(`Creating GeoTIFF layer from tile URL: ${tileUrl}`);
+          const result = await createGeoTIFFLayer(tileUrl, `${fileName}-${tileUrl.split("/").pop()}`);
+          if (result && mapContext.map) {
+            const { layer, source } = result;
+            console.log(`Adding layer to map: ${layer.get("name")}`);
+            mapContext.map.addLayer(layer);
+            layer.setVisible(layerData.isVisible);
+            console.log(`Layer added and visibility set to: ${layerData.isVisible}`);
+            createdLayers.push(layer);
+
+            // Update map view using GeoTIFF metadata (only for first layer)
+            if (shouldUpdateView) {
+              shouldUpdateView = false;
+              try {
+                const view = getView(source, withHigherResolutions(1), withExtentCenter());
+                console.log("Setting map view from GeoTIFF source");
+                mapContext.map.setView(view);
+              } catch (err) {
+                console.warn("Failed to set view from GeoTIFF metadata:", err);
+              }
+            }
+          } else {
+            console.warn(`Failed to create layer from ${tileUrl}`);
+          }
+        }
+
+        // Update state with layer references
+        if (createdLayers.length > 0) {
+          setCanopyLayers((prev) => ({
+            ...prev,
+            [fileName]: { ...prev[fileName]!, layers: createdLayers },
+          }));
+        }
+      }
+    };
+
+    createAndAddLayers().catch((error) => {
+      console.error("Error creating GeoTIFF layers:", error);
+    });
+
+    // Cleanup: remove layers when they're deleted from state
+    if (mapContext.map) {
+      const existingCanopyLayers = mapContext.map
+        .getLayers()
+        .getArray()
+        .filter((layer) => layer.get("isCanopyLayer"));
+
+      for (const layer of existingCanopyLayers) {
+        const fileName = layer.get("name");
+        if (!canopyLayers[fileName]) {
+          mapContext.map.removeLayer(layer);
+        }
+      }
+    }
+  }, [canopyLayers, mapContext.map]);
 
   useEffect(() => {
     if (!mapContext.map || !pmtilesLayer) {
@@ -418,7 +559,13 @@ export default function MapContainer() {
         />
       ) : null}
 
-      <VectorDropzone map={mapContext.map} onMessage={setStatusMessage} />
+      <VectorDropzone 
+        map={mapContext.map} 
+        onMessage={setStatusMessage}
+        onCanopyExtractionStart={onCanopyExtractionStart}
+        onCanopyExtractionComplete={onCanopyExtractionComplete}
+        onCanopyExtractionError={onCanopyExtractionError}
+      />
 
       <div className="pointer-events-none absolute inset-0 z-50">
         <div className="pointer-events-auto absolute left-3 top-3 md:left-5 md:top-5">
@@ -437,7 +584,16 @@ export default function MapContainer() {
         </div>
 
         <div className="pointer-events-auto absolute right-3 top-3 md:right-5 md:top-5">
-          <Legend open={isLegendOpen} onOpenChange={setIsLegendOpen} />
+          <Legend 
+            open={isLegendOpen} 
+            onOpenChange={setIsLegendOpen}
+            canopyLayers={Object.entries(canopyLayers).map(([name, data]) => ({
+              fileName: name,
+              isLoading: data.isLoading,
+              isVisible: data.isVisible,
+            }))}
+            onCanopyLayerVisibilityChange={onCanopyLayerVisibilityChange}
+          />
         </div>
 
         {hoverPixelInfo &&

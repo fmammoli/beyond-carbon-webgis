@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { ChevronDown, ListTree } from "lucide-react";
+import { ChevronDown, ListTree, Loader2 } from "lucide-react";
 
 import { MAPBIOMAS_CLASSES } from "@/lib/mapbiomas-colors";
 import { Button } from "@/components/ui/button";
@@ -11,10 +11,17 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Switch } from "@/components/ui/switch";
 
 type LegendProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  canopyLayers?: Array<{
+    fileName: string;
+    isLoading: boolean;
+    isVisible: boolean;
+  }>;
+  onCanopyLayerVisibilityChange?: (fileName: string, isVisible: boolean) => void;
 };
 
 const TOP_LEVEL_LABELS: Record<string, { en: string; id: string }> = {
@@ -60,7 +67,7 @@ function getIndonesianLabel(englishLabel: string): string {
   return CLASS_LABEL_TRANSLATIONS_ID[englishLabel] ?? englishLabel;
 }
 
-export function Legend({ open, onOpenChange }: LegendProps) {
+export function Legend({ open, onOpenChange, canopyLayers, onCanopyLayerVisibilityChange }: LegendProps) {
   const groupedClasses = useMemo(() => {
     const grouped = new Map<
       string,
@@ -159,6 +166,29 @@ export function Legend({ open, onOpenChange }: LegendProps) {
           </CardContent>
         </CollapsibleContent>
       </Card>
+
+      {canopyLayers && canopyLayers.length > 0 && (
+        <Card className="w-[min(68vw,15rem)] border-white/30 bg-card/90 shadow-lg backdrop-blur-sm mt-2">
+          <CardHeader className="pb-1.5 pt-3">
+            <CardTitle className="text-xs font-semibold">Canopy Height Model</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 pb-3">
+            {canopyLayers.map((layer) => (
+              <div key={layer.fileName} className="flex items-center justify-between gap-2 rounded-md border border-border/60 p-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  {layer.isLoading && <Loader2 className="size-3.5 animate-spin shrink-0" />}
+                  <span className="text-[11px] truncate">{layer.fileName}</span>
+                </div>
+                <Switch
+                  checked={layer.isVisible}
+                  onCheckedChange={(checked) => onCanopyLayerVisibilityChange?.(layer.fileName, checked)}
+                  disabled={layer.isLoading}
+                />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
     </Collapsible>
   );
 }
