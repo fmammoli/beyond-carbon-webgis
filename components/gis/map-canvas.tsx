@@ -26,6 +26,8 @@ type MapCanvasProps = {
 
 const ESRI_SATELLITE_URL =
   "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+const CARTO_LIGHT_BASEMAP_URL =
+  "https://basemaps.cartocdn.com/rastertiles/light_nolabels/{z}/{x}/{y}.png";
 const ESRI_BOUNDARIES_AND_PLACES_URL =
   "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}";
 
@@ -36,8 +38,10 @@ export function MapCanvas({
 }: MapCanvasProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const satelliteLayerRef = useRef<TileLayer<XYZ> | null>(null);
+  const basicBasemapLayerRef = useRef<TileLayer<XYZ> | null>(null);
   const boundariesAndPlacesLayerRef = useRef<TileLayer<XYZ> | null>(null);
   const initialSatelliteVisibleRef = useRef(satelliteVisible);
+  const initialBasicBasemapVisibleRef = useRef(!satelliteVisible);
   const initialBoundariesAndPlacesVisibleRef = useRef(boundariesAndPlacesVisible);
 
   useEffect(() => {
@@ -56,6 +60,16 @@ export function MapCanvas({
       zIndex: 0,
     });
 
+    const basicBasemapLayer = new TileLayer({
+      source: new XYZ({
+        attributions: "CARTO",
+        crossOrigin: "anonymous",
+        url: CARTO_LIGHT_BASEMAP_URL,
+      }),
+      visible: initialBasicBasemapVisibleRef.current,
+      zIndex: 0,
+    });
+
     const boundariesAndPlacesLayer = new TileLayer({
       source: new XYZ({
         attributions: "Esri World Boundaries and Places",
@@ -67,12 +81,13 @@ export function MapCanvas({
     });
 
     satelliteLayerRef.current = satelliteLayer;
+  basicBasemapLayerRef.current = basicBasemapLayer;
     boundariesAndPlacesLayerRef.current = boundariesAndPlacesLayer;
 
     const map = new Map({
       target,
       controls: defaultControls({ rotate: false }),
-      layers: [satelliteLayer, boundariesAndPlacesLayer],
+      layers: [satelliteLayer, basicBasemapLayer, boundariesAndPlacesLayer],
       view: new View({
         center: fromLonLat(INDONESIA_CENTER_LON_LAT),
         zoom: INDONESIA_DEFAULT_ZOOM,
@@ -86,12 +101,14 @@ export function MapCanvas({
     return () => {
       map.setTarget(undefined);
       satelliteLayerRef.current = null;
+      basicBasemapLayerRef.current = null;
       boundariesAndPlacesLayerRef.current = null;
     };
   }, [onReady]);
 
   useEffect(() => {
     satelliteLayerRef.current?.setVisible(satelliteVisible);
+    basicBasemapLayerRef.current?.setVisible(!satelliteVisible);
   }, [satelliteVisible]);
 
   useEffect(() => {

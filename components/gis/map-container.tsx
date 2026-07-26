@@ -43,6 +43,8 @@ type HoverPixelInfo = {
   green: number;
   blue: number;
   alpha: number;
+  pixelX: number;
+  pixelY: number;
   requestedZoom: number | null;
   sourceZoom: number | null;
 };
@@ -237,6 +239,9 @@ export default function MapContainer() {
       return;
     }
 
+    let hoverUpdateFrameId: number | null = null;
+    let latestPixel: [number, number] | null = null;
+
     const readPixelComponent = (
       pixelData: Uint8ClampedArray | Uint8Array | Float32Array | DataView,
       index: number,
@@ -253,56 +258,115 @@ export default function MapContainer() {
       event: MapBrowserEvent<PointerEvent | KeyboardEvent | WheelEvent>,
     ) => {
       if (event.dragging || !isLandcoverVisible) {
+        if (hoverUpdateFrameId !== null) {
+          window.cancelAnimationFrame(hoverUpdateFrameId);
+          hoverUpdateFrameId = null;
+        }
+
+        latestPixel = null;
+
         setHoverPixelInfo(null);
         return;
       }
 
-      const pixelData = pmtilesLayer.getData(event.pixel);
-      if (!pixelData || pixelData.byteLength === 0) {
-        setHoverPixelInfo(null);
-        return;
-      }
-
-      const red = readPixelComponent(pixelData, 0, 0);
-      const green = readPixelComponent(pixelData, 1, red);
-      const blue = readPixelComponent(pixelData, 2, red);
-      const alpha = readPixelComponent(pixelData, 3, 255);
-
-      const code =
-        alpha === 0
-          ? null
-          : showLandcoverCodes
-            ? red
-            : resolveClassCodeFromRenderedRgb(red, green, blue);
-
-      const viewZoom = event.map.getView().getZoom();
-      const requestedZoom = Number.isFinite(viewZoom) ? Math.round(viewZoom ?? 0) : null;
-      const sourceZoom =
-        requestedZoom === null || !pmtilesZoomRange
-          ? requestedZoom
-          : Math.max(pmtilesZoomRange.minZoom, Math.min(pmtilesZoomRange.maxZoom, requestedZoom));
+      const [pixelX, pixelY] = event.pixel;
+      latestPixel = [pixelX, pixelY];
 
       setHoverPixelInfo((previous) => {
-        if (
-          previous &&
-          previous.code === code &&
-          previous.red === red &&
-          previous.green === green &&
-          previous.blue === blue &&
-          previous.alpha === alpha &&
-          previous.requestedZoom === requestedZoom &&
-          previous.sourceZoom === sourceZoom
-        ) {
+        if (!previous) {
           return previous;
         }
 
-        return { code, red, green, blue, alpha, requestedZoom, sourceZoom };
+        if (previous.pixelX === pixelX && previous.pixelY === pixelY) {
+          return previous;
+        }
+
+        return {
+          ...previous,
+          pixelX,
+          pixelY,
+        };
+      });
+
+      if (hoverUpdateFrameId !== null) {
+        return;
+      }
+
+      hoverUpdateFrameId = window.requestAnimationFrame(() => {
+        hoverUpdateFrameId = null;
+
+        if (!latestPixel) {
+          return;
+        }
+
+        const [nextPixelX, nextPixelY] = latestPixel;
+
+        const pixelData = pmtilesLayer.getData([nextPixelX, nextPixelY]);
+        if (!pixelData || pixelData.byteLength === 0) {
+          setHoverPixelInfo(null);
+          return;
+        }
+
+        const red = readPixelComponent(pixelData, 0, 0);
+        const green = readPixelComponent(pixelData, 1, red);
+        const blue = readPixelComponent(pixelData, 2, red);
+        const alpha = readPixelComponent(pixelData, 3, 255);
+
+        const code =
+          alpha === 0
+            ? null
+            : showLandcoverCodes
+              ? red
+              : resolveClassCodeFromRenderedRgb(red, green, blue);
+
+        const viewZoom = mapContext.map?.getView().getZoom();
+        const requestedZoom = Number.isFinite(viewZoom) ? Math.round(viewZoom ?? 0) : null;
+        const sourceZoom =
+          requestedZoom === null || !pmtilesZoomRange
+            ? requestedZoom
+            : Math.max(
+                pmtilesZoomRange.minZoom,
+                Math.min(pmtilesZoomRange.maxZoom, requestedZoom),
+              );
+
+        setHoverPixelInfo((previous) => {
+          if (
+            previous &&
+            previous.code === code &&
+            previous.red === red &&
+            previous.green === green &&
+            previous.blue === blue &&
+            previous.alpha === alpha &&
+            previous.pixelX === nextPixelX &&
+            previous.pixelY === nextPixelY &&
+            previous.requestedZoom === requestedZoom &&
+            previous.sourceZoom === sourceZoom
+          ) {
+            return previous;
+          }
+
+          return {
+            code,
+            red,
+            green,
+            blue,
+            alpha,
+            pixelX: nextPixelX,
+            pixelY: nextPixelY,
+            requestedZoom,
+            sourceZoom,
+          };
+        });
       });
     };
 
     mapContext.map.on("pointermove", handlePointerMove);
 
     return () => {
+      if (hoverUpdateFrameId !== null) {
+        window.cancelAnimationFrame(hoverUpdateFrameId);
+      }
+
       mapContext.map?.un("pointermove", handlePointerMove);
     };
   }, [isLandcoverVisible, mapContext.map, pmtilesLayer, pmtilesZoomRange, showLandcoverCodes]);
@@ -310,6 +374,27 @@ export default function MapContainer() {
   const hoveredClass =
     hoverPixelInfo?.code !== null && hoverPixelInfo?.code !== undefined
       ? MAPBIOMAS_CLASS_LOOKUP[hoverPixelInfo.code]
+      : null;
+  const hoverTooltipStyle =
+    hoverPixelInfo && mapContext.map
+      ? (() => {
+          const mapSize = mapContext.map.getSize();
+          const tooltipWidth = 192;
+          const tooltipHeight = 44;
+          const offsetX = 16;
+          const offsetY = 30;
+          const left = mapSize
+            ? Math.min(hoverPixelInfo.pixelX + offsetX, Math.max(12, mapSize[0] - tooltipWidth - 12))
+            : hoverPixelInfo.pixelX + offsetX;
+          const top = mapSize
+            ? Math.min(
+                Math.max(12, hoverPixelInfo.pixelY - offsetY),
+                Math.max(12, mapSize[1] - tooltipHeight - 12),
+              )
+            : hoverPixelInfo.pixelY - offsetY;
+
+          return { left, top };
+        })()
       : null;
 
   return (
@@ -355,21 +440,45 @@ export default function MapContainer() {
           <Legend open={isLegendOpen} onOpenChange={setIsLegendOpen} />
         </div>
 
-        <div className="pointer-events-auto absolute bottom-4 left-1/2 w-full -translate-x-1/2 px-3 md:bottom-6 md:px-5">
-          <div className="mx-auto w-fit">
-            <TimeSlider
-              year={year}
-              minYear={MIN_YEAR}
-              maxYear={MAX_YEAR}
-              isPlaying={isPlaying}
-              canAdvance={!isFrameLoading}
-              isFrameLoading={isFrameLoading}
-              isPreloadingYears={isPreloadingYears}
-              onYearChange={setYear}
-              onPlayingChange={setIsPlaying}
-            />
+        {hoverPixelInfo &&
+        hoverTooltipStyle &&
+        isLandcoverVisible &&
+        hoverPixelInfo.alpha > 0 &&
+        hoveredClass ? (
+          <div
+            className="pointer-events-none absolute z-40 max-w-48 rounded-md border border-white/35 bg-black/75 px-2.5 py-1.5 text-[11px] text-white shadow-lg backdrop-blur-sm duration-100 ease-out animate-in fade-in-0 zoom-in-95 slide-in-from-left-1 transition-[left,top]"
+            style={hoverTooltipStyle}
+          >
+            <div className="flex items-center gap-2">
+              <span
+                className="h-3 w-3 shrink-0 rounded-xs ring-1 ring-white/60"
+                style={{ backgroundColor: hoveredClass.color }}
+              />
+              <div className="min-w-0 leading-tight">
+                <div className="truncate">{hoveredClass.label}</div>
+                <div className="truncate text-white/75">{hoveredClass.labelId}</div>
+              </div>
+            </div>
           </div>
-        </div>
+        ) : null}
+
+        {isLandcoverVisible ? (
+          <div className="pointer-events-auto absolute bottom-4 left-1/2 w-full -translate-x-1/2 px-3 md:bottom-6 md:px-5">
+            <div className="mx-auto w-fit">
+              <TimeSlider
+                year={year}
+                minYear={MIN_YEAR}
+                maxYear={MAX_YEAR}
+                isPlaying={isPlaying}
+                canAdvance={!isFrameLoading}
+                isFrameLoading={isFrameLoading}
+                isPreloadingYears={isPreloadingYears}
+                onYearChange={setYear}
+                onPlayingChange={setIsPlaying}
+              />
+            </div>
+          </div>
+        ) : null}
 
         {hoverPixelInfo && mapContext.map && pmtilesLayer && isLandcoverVisible ? (
           <div className="pointer-events-none absolute bottom-28 right-3 w-[min(92vw,22rem)] rounded-xl border border-white/30 bg-black/70 px-3 py-2 text-xs text-white shadow-lg backdrop-blur-sm md:bottom-36 md:right-5">
