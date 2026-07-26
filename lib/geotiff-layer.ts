@@ -13,10 +13,18 @@ export async function createGeoTIFFLayer(
   try {
     console.log("Creating GeoTIFF layer for URL:", url);
 
-    // Extract the S3 key from the URL
-    const key = url.split("amazonaws.com/")[1];
-    if (!key) {
+    // Extract the S3 key from the URL (remove bucket name)
+    // URL format: https://s3.us-east-1.amazonaws.com/dataforgood-fb-data/forests/...
+    // We need: forests/v2/global/dinov3_global_chm_v2_ml3/...
+    const fullPath = url.split("amazonaws.com/")[1];
+    if (!fullPath) {
       throw new Error(`Invalid S3 URL: ${url}`);
+    }
+    
+    // Remove the bucket name (first path segment)
+    const key = fullPath.split("/").slice(1).join("/");
+    if (!key) {
+      throw new Error(`Could not extract key from URL: ${url}`);
     }
 
     // Use the proxy endpoint for CORS-safe access
