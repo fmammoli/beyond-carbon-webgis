@@ -71,11 +71,17 @@ export async function GET(request: NextRequest) {
     }
 
     console.log("Fetching COG from S3:", url);
+    const fetchHeaders: Record<string, string> = {
+      "Accept": "application/octet-stream",
+    };
+    
+    const rangeHeader = request.headers.get("Range");
+    if (rangeHeader) {
+      fetchHeaders["Range"] = rangeHeader;
+    }
+
     const response = await fetch(url, {
-      headers: {
-        "Accept": "application/octet-stream",
-        "Range": request.headers.get("Range") || undefined,
-      },
+      headers: fetchHeaders,
     });
 
     console.log("S3 COG response status:", response.status, response.statusText);
