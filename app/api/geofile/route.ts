@@ -56,6 +56,7 @@ export async function GET(request: NextRequest) {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
       "Access-Control-Allow-Headers": "Range, Content-Type",
+      "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Type, Accept-Ranges",
       "Content-Type": "image/tiff",
       "Accept-Ranges": "bytes",
       "Cache-Control": "public, max-age=31536000", // 1 year for immutable GeoTIFF
@@ -123,6 +124,7 @@ export async function HEAD(request: NextRequest) {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
       "Access-Control-Allow-Headers": "Range, Content-Type",
+      "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Type, Accept-Ranges",
       "Content-Type": "image/tiff",
       "Accept-Ranges": "bytes",
     };
@@ -148,6 +150,7 @@ export async function OPTIONS() {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
       "Access-Control-Allow-Headers": "Range, Content-Type",
+      "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Type, Accept-Ranges",
     },
   });
 }

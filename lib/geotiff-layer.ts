@@ -13,11 +13,21 @@ export async function createGeoTIFFLayer(
   try {
     console.log("Creating GeoTIFF layer for URL:", url);
 
-    // Create GeoTIFF source directly from S3 URL (no proxy needed)
+    // Extract the S3 key from the URL
+    const key = url.split("amazonaws.com/")[1];
+    if (!key) {
+      throw new Error(`Invalid S3 URL: ${url}`);
+    }
+
+    // Use the proxy endpoint for CORS-safe access
+    const proxyUrl = `/api/geofile?key=${encodeURIComponent(key)}`;
+    console.log("Using proxy URL:", proxyUrl);
+
+    // Create GeoTIFF source with the proxy URL
     const source = new GeoTIFFSource({
       sources: [
         {
-          url: url,
+          url: proxyUrl,
         },
       ],
     });
