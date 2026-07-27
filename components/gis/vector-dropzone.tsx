@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type Map from "ol/Map";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import type { FeatureCollection, GeoJsonProperties, Geometry as GeoJsonGeometry } from "geojson";
+import type OLMap from "ol/Map";
+import type BaseLayer from "ol/layer/Base";
 import GeoJSON from "ol/format/GeoJSON";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
@@ -11,41 +13,68 @@ import { Fill, Stroke, Style, Circle as CircleStyle } from "ol/style";
 import { createEmpty, extend, isEmpty } from "ol/extent";
 import { Upload } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { buildCommunityBoundaryGeoJson } from "@/lib/community-boundary";
 import { filterVectorFiles, groupFilesByBaseName, parseVectorFile } from "@/lib/vector-import";
-import { getCanopyTileUrlsForGeometry } from "@/lib/s3-canopy";
 
 type VectorDropzoneProps = {
-  map: Map | null;
+  map: OLMap | null;
   onMessage: (message: string | null) => void;
-  onCanopyExtractionStart?: (fileName: string) => void;
-  onCanopyExtractionComplete?: (fileName: string, tileUrls: string[]) => void;
-  onCanopyExtractionError?: (fileName: string, error: string) => void;
+  onVectorLayerAdd?: (
+    fileName: string,
+    payload: {
+      layer: BaseLayer;
+      defaultFillOpacity: number;
+      setFillOpacity: (opacity: number) => void;
+    },
+  ) => void;
+  onCanopyExtractionQueued?: (
+    fileName: string,
+    geometry?: FeatureCollection<GeoJsonGeometry, GeoJsonProperties>,
+  ) => void;
 };
 
-const VECTOR_STYLE = new Style({
-  stroke: new Stroke({
-    color: "#ff3b30",
-    width: 2,
-  }),
-  fill: new Fill({
-    color: "rgba(255, 59, 48, 0.2)",
-  }),
-  image: new CircleStyle({
-    radius: 5,
-    fill: new Fill({ color: "#ff3b30" }),
-    stroke: new Stroke({ color: "#ffffff", width: 1.5 }),
-  }),
-});
+type VectorDropzoneHandle = {
+  openFilePicker: () => void;
+};
 
-export function VectorDropzone({ map, onMessage, onCanopyExtractionStart, onCanopyExtractionComplete, onCanopyExtractionError }: VectorDropzoneProps) {
+const UPLOADED_VECTOR_Z_INDEX = 2000;
+const DEFAULT_VECTOR_FILL_OPACITY = 0.2;
+
+function createVectorStyle(fillOpacity: number): Style {
+  return new Style({
+    stroke: new Stroke({
+      color: "#ff3b30",
+      width: 2,
+    }),
+    fill: new Fill({
+      color: `rgba(255, 59, 48, ${fillOpacity})`,
+    }),
+    image: new CircleStyle({
+      radius: 5,
+      fill: new Fill({ color: "#ff3b30" }),
+      stroke: new Stroke({ color: "#ffffff", width: 1.5 }),
+    }),
+  });
+}
+
+const VectorDropzone = forwardRef<VectorDropzoneHandle, VectorDropzoneProps>(function VectorDropzone({
+  map,
+  onMessage,
+  onVectorLayerAdd,
+  onCanopyExtractionQueued,
+}, ref) {
   const [isDragActive, setIsDragActive] = useState(false);
   const dragDepthRef = useRef(0);
-  const sourceRef = useRef<VectorSource | null>(null);
-  const layerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const layersRef = useRef(new Map<string, VectorLayer<VectorSource>>());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const geojsonFormat = useMemo(() => new GeoJSON(), []);
+
+  useImperativeHandle(ref, () => ({
+    openFilePicker: () => {
+      fileInputRef.current?.click();
+    },
+  }), []);
 
   const collectFilesFromTransfer = useCallback(async (items: DataTransferItemList | null, fallbackFiles: File[]) => {
     if (!items || items.length === 0) {
@@ -102,10 +131,9 @@ export function VectorDropzone({ map, onMessage, onCanopyExtractionStart, onCano
   }, []);
 
   const importFiles = useCallback(async (files: File[]) => {
-    const source = sourceRef.current;
     const mapView = map?.getView();
 
-    if (!source || !mapView) {
+    if (!map || !mapView) {
       onMessage("Vector layer is not ready yet.");
       return;
     }
@@ -125,32 +153,6 @@ export function VectorDropzone({ map, onMessage, onCanopyExtractionStart, onCano
       try {
         const parsed = await parseVectorFile(fileGroup);
         const fileName = parsed.fileName;
-        
-        if (onCanopyExtractionStart) {
-          onCanopyExtractionStart(fileName);
-        }
-
-        // Query S3 for canopy tiles that intersect with the shapefile
-        try {
-          const tileUrls = await getCanopyTileUrlsForGeometry(parsed.geojson);
-
-          if (tileUrls.length === 0) {
-            if (onCanopyExtractionError) {
-              onCanopyExtractionError(fileName, "No canopy tiles found for this area");
-            }
-            onMessage(`${fileName}: No canopy tiles found for this area`);
-          } else {
-            if (onCanopyExtractionComplete) {
-              onCanopyExtractionComplete(fileName, tileUrls);
-            }
-          }
-        } catch (canopyError) {
-          const message = canopyError instanceof Error ? canopyError.message : "Unknown error";
-          if (onCanopyExtractionError) {
-            onCanopyExtractionError(fileName, message);
-          }
-          onMessage(`${fileName}: Failed to load canopy tiles: ${message}`);
-        }
 
         const features = geojsonFormat.readFeatures(parsed.geojson, {
           dataProjection: "EPSG:4326",
@@ -161,7 +163,47 @@ export function VectorDropzone({ map, onMessage, onCanopyExtractionStart, onCano
           continue;
         }
 
-        source.addFeatures(features);
+        const source = new VectorSource({ features });
+        let fillOpacity = DEFAULT_VECTOR_FILL_OPACITY;
+
+        const nextLayer = new VectorLayer({
+          source,
+          style: createVectorStyle(fillOpacity),
+          zIndex: UPLOADED_VECTOR_Z_INDEX,
+          properties: {
+            name: fileName,
+            isVectorUploadLayer: true,
+          },
+        });
+
+        const setFillOpacity = (opacity: number) => {
+          fillOpacity = opacity;
+          nextLayer.setStyle(createVectorStyle(fillOpacity));
+        };
+
+        const existingLayer = layersRef.current.get(fileName);
+        if (existingLayer) {
+          map.removeLayer(existingLayer);
+        }
+
+        map.addLayer(nextLayer);
+        layersRef.current.set(fileName, nextLayer);
+        onVectorLayerAdd?.(fileName, {
+          layer: nextLayer,
+          defaultFillOpacity: fillOpacity,
+          setFillOpacity,
+        });
+
+        // Queue canopy extraction and let layer controls trigger download.
+        const boundaryGeoJson = buildCommunityBoundaryGeoJson(parsed.geojson);
+        onCanopyExtractionQueued?.(fileName, boundaryGeoJson.boundary);
+
+        if (boundaryGeoJson.wasClipped) {
+          onMessage(
+            `${fileName}: AOI side ${boundaryGeoJson.requestedSideKilometers.toFixed(2)} km exceeded ${boundaryGeoJson.maxAllowedSideKilometers.toFixed(0)} km and was clipped to ${boundaryGeoJson.finalSideKilometers.toFixed(2)} km.`,
+          );
+        }
+
         totalAdded += features.length;
 
         const featuresExtent = source.getExtent();
@@ -187,29 +229,30 @@ export function VectorDropzone({ map, onMessage, onCanopyExtractionStart, onCano
       padding: [40, 40, 40, 40],
     });
 
-    onMessage(`Added ${totalAdded} vector feature${totalAdded === 1 ? "" : "s"}.`);
-  }, [geojsonFormat, map, onMessage]);
+    onMessage(
+      `Added ${totalAdded} vector feature${totalAdded === 1 ? "" : "s"}. Canopy Height is ready to generate from Layer Controls.`,
+    );
+  }, [
+    geojsonFormat,
+    map,
+    onCanopyExtractionQueued,
+    onMessage,
+    onVectorLayerAdd,
+  ]);
 
   useEffect(() => {
-    if (!map || layerRef.current) {
-      return;
-    }
-
-    const source = new VectorSource();
-    const layer = new VectorLayer({
-      source,
-      style: VECTOR_STYLE,
-      zIndex: 30,
-    });
-
-    sourceRef.current = source;
-    layerRef.current = layer;
-    map.addLayer(layer);
+    const vectorLayers = layersRef.current;
 
     return () => {
-      map.removeLayer(layer);
-      sourceRef.current = null;
-      layerRef.current = null;
+      if (!map) {
+        return;
+      }
+
+      for (const layer of vectorLayers.values()) {
+        map.removeLayer(layer);
+      }
+
+      vectorLayers.clear();
     };
   }, [map]);
 
@@ -222,6 +265,8 @@ export function VectorDropzone({ map, onMessage, onCanopyExtractionStart, onCano
     if (!target) {
       return;
     }
+
+    const fileInputElement = fileInputRef.current;
 
     const onDragEnter = (event: DragEvent) => {
       event.preventDefault();
@@ -279,14 +324,14 @@ export function VectorDropzone({ map, onMessage, onCanopyExtractionStart, onCano
     target.addEventListener("dragover", onDragOver);
     target.addEventListener("dragleave", onDragLeave);
     target.addEventListener("drop", onDrop);
-    fileInputRef.current?.addEventListener("change", onFileSelection);
+    fileInputElement?.addEventListener("change", onFileSelection);
 
     return () => {
       target.removeEventListener("dragenter", onDragEnter);
       target.removeEventListener("dragover", onDragOver);
       target.removeEventListener("dragleave", onDragLeave);
       target.removeEventListener("drop", onDrop);
-      fileInputRef.current?.removeEventListener("change", onFileSelection);
+      fileInputElement?.removeEventListener("change", onFileSelection);
     };
   }, [collectFilesFromTransfer, geojsonFormat, map, onMessage, importFiles]);
 
@@ -310,20 +355,7 @@ export function VectorDropzone({ map, onMessage, onCanopyExtractionStart, onCano
         }}
       />
 
-      <div className="pointer-events-none absolute inset-0 z-40 transition">
-        <div className="pointer-events-auto absolute right-3 top-20 md:right-5 md:top-24">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className="shadow-lg"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Upload className="size-3.5" />
-            Upload layer or folder
-          </Button>
-        </div>
-
+      <div className="pointer-events-none absolute inset-0 z-60 transition">
         {isDragActive ? (
           <div className="absolute inset-6 grid place-items-center rounded-2xl border-2 border-dashed border-cyan-900/70 bg-cyan-100/70 text-cyan-950">
             <div className="flex flex-col items-center gap-3 p-4 text-center">
@@ -336,5 +368,8 @@ export function VectorDropzone({ map, onMessage, onCanopyExtractionStart, onCano
       </div>
     </>
   );
-}
+});
+
+export { VectorDropzone };
+export type { VectorDropzoneHandle };
 

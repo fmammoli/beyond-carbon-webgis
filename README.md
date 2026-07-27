@@ -58,7 +58,9 @@ npm run build
 
 ## Canopy Extraction API
 
-- Set `CANOPY_API_KEY` on the Next.js server and `CANOPY_API_URL` if the FastAPI upstream is not `http://127.0.0.1:8000/api/v1/chm/crop`.
+- Set `CHM_API_KEY` on the Next.js server and `CANOPY_API_URL` if the FastAPI upstream is not `http://178.104.153.106/api/v1/chm/crop`.
+- If the upstream returns `Invalid host header`, set `CANOPY_API_HOST_HEADER` to the exact host expected by upstream trusted-host checks (usually the hostname or IP from `CANOPY_API_URL`, for example `178.104.153.106`).
+- Optional: set `CANOPY_API_TIMEOUT_MS` (default `30000`) to control how long the proxy waits before reporting upstream timeout.
 - Put those values in `.env.local`, then restart `npm run dev` so Next.js reloads them.
 - The client sends `geojson` to `/api/canopy/extract`; the route proxies it upstream with `X-API-Key`.
 - The browser downloads streamed GeoTIFF responses as `.tif` files.

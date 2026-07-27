@@ -128,3 +128,23 @@
     @apply font-sans;
   }
 }
+
+@layer base {
+  .ol-control {
+    z-index: 30;
+  }
+
+  .ol-zoom {
+    top: auto;
+    right: auto;
+    bottom: 1rem;
+    left: 0.75rem;
+  }
+
+  @media (min-width: 768px) {
+    .ol-zoom {
+      bottom: 1.5rem;
+      left: 1.25rem;
+    }
+  }
+}

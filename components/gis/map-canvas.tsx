@@ -57,6 +57,7 @@ export function MapCanvas({
         url: ESRI_SATELLITE_URL,
       }),
       visible: initialSatelliteVisibleRef.current,
+      opacity: 1,
       zIndex: 0,
     });
 
@@ -67,6 +68,7 @@ export function MapCanvas({
         url: CARTO_LIGHT_BASEMAP_URL,
       }),
       visible: initialBasicBasemapVisibleRef.current,
+      opacity: 1,
       zIndex: 0,
     });
 
@@ -77,6 +79,7 @@ export function MapCanvas({
         url: ESRI_BOUNDARIES_AND_PLACES_URL,
       }),
       visible: initialBoundariesAndPlacesVisibleRef.current,
+      opacity: 1,
       zIndex: 20,
     });
 

@@ -1,7 +1,27 @@
 import type { FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
 
+import {
+  DEFAULT_CHM_429_BACKOFF_MS,
+  DEFAULT_CHM_API_BASE_URL,
+  DEFAULT_CHM_INITIAL_POLL_INTERVAL_MS,
+  DEFAULT_CHM_MAX_POLL_INTERVAL_MS,
+  type ChmApiError,
+  type ChmClientOptions,
+  type ChmDownloadResult,
+  type ChmJob,
+  type ChmJobError,
+  type ChmJobResult,
+  type ChmJobStatus,
+  type ChmPollOptions,
+  createChmJob,
+  downloadChmResult,
+  getChmJob,
+  pollChmJob,
+} from "@/lib/chm-extraction";
+
 export const DEFAULT_CANOPY_BUFFER_KM = 20;
 export const DEFAULT_CANOPY_OUTPUT = "tif" as const;
+export const DEFAULT_CANOPY_JOB_POLL_INTERVAL_MS = DEFAULT_CHM_INITIAL_POLL_INTERVAL_MS;
 
 export type CanopyExtractionOutput = "tif" | "geojson" | "both";
 
@@ -12,66 +32,68 @@ export type CanopyExtractionRequest = {
   sourceFileName?: string;
 };
 
-type CanopyExtractionSuccessResponse = Record<string, unknown> | string | null;
+export type CanopyExtractionJobStatus = ChmJobStatus;
+export type CanopyExtractionJobError = ChmJobError;
+export type CanopyExtractionJobResult = ChmJobResult;
+export type CanopyExtractionJob = ChmJob;
+export type CanopyExtractionDownloadResult = ChmDownloadResult;
+export type CanopyExtractionApiError = ChmApiError;
+export type CanopyExtractionClientOptions = ChmClientOptions;
+export type CanopyExtractionPollOptions = ChmPollOptions;
 
-function getCanopyExtractionEndpoint(): string {
-  return process.env.NEXT_PUBLIC_CANOPY_API_URL ?? "/api/canopy/extract";
+export { DEFAULT_CHM_429_BACKOFF_MS, DEFAULT_CHM_API_BASE_URL, DEFAULT_CHM_INITIAL_POLL_INTERVAL_MS, DEFAULT_CHM_MAX_POLL_INTERVAL_MS };
+
+export const createCanopyExtractionJob = createChmJob;
+export const getCanopyExtractionJob = getChmJob;
+export { createChmJob, downloadChmResult, getChmJob, pollChmJob };
+
+export async function getCanopyExtractionBlobUrlFromJob(
+  jobIdOrDownloadUrl: string | { jobId?: string; downloadUrl?: string },
+): Promise<string> {
+  const candidate = typeof jobIdOrDownloadUrl === "string"
+    ? jobIdOrDownloadUrl
+    : jobIdOrDownloadUrl.downloadUrl ?? jobIdOrDownloadUrl.jobId ?? "";
+
+  const result = await downloadChmResult(candidate);
+  return URL.createObjectURL(result.blob);
 }
 
-function sanitizeDownloadName(fileName: string): string {
-  const trimmedName = fileName.trim();
-  if (trimmedName.length === 0) {
-    return "canopy-height-model.tif";
+export async function waitForCanopyExtractionJob(
+  jobId: string,
+  options?: {
+    pollIntervalMs?: number;
+    baseUrl?: string;
+    signal?: AbortSignal;
+  },
+): Promise<CanopyExtractionJob> {
+  return pollChmJob(jobId, {
+    baseUrl: options?.baseUrl,
+    signal: options?.signal,
+    initialIntervalMs: options?.pollIntervalMs ?? DEFAULT_CHM_INITIAL_POLL_INTERVAL_MS,
+    maxIntervalMs: DEFAULT_CHM_MAX_POLL_INTERVAL_MS,
+    backoffIntervalMs: DEFAULT_CHM_429_BACKOFF_MS,
+  });
+}
+
+/**
+ * Legacy convenience wrapper that now uses async jobs under the hood.
+ */
+export async function getCanopyExtractionBlobUrl(
+  geometry: FeatureCollection<Geometry, GeoJsonProperties>,
+): Promise<string> {
+  const createdJob = await createChmJob(geometry);
+  const completedJob = await waitForCanopyExtractionJob(createdJob.jobId);
+
+  if (completedJob.status !== "succeeded" || !completedJob.result) {
+    const message = completedJob.error?.message ?? completedJob.message ?? "Canopy extraction did not complete successfully.";
+    throw new Error(message);
   }
 
-  return trimmedName.toLowerCase().endsWith(".tif") || trimmedName.toLowerCase().endsWith(".tiff")
-    ? trimmedName
-    : `${trimmedName}.tif`;
-}
-
-function downloadBlob(blob: Blob, fileName: string): void {
-  const objectUrl = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = objectUrl;
-  anchor.download = sanitizeDownloadName(fileName);
-  anchor.rel = "noreferrer";
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  return getCanopyExtractionBlobUrlFromJob(completedJob.result.downloadUrl);
 }
 
 export async function submitCanopyExtractionRequest(
   request: CanopyExtractionRequest,
-): Promise<CanopyExtractionSuccessResponse> {
-  const response = await fetch(getCanopyExtractionEndpoint(), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      geojson: request.geometry,
-    }),
-  });
-
-  if (!response.ok) {
-    const responseText = await response.text().catch(() => "");
-    const suffix = responseText ? `: ${responseText}` : "";
-    throw new Error(`Canopy extraction request failed (${response.status})${suffix}`);
-  }
-
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
-    return response.json() as Promise<Record<string, unknown>>;
-  }
-
-  const blob = await response.blob();
-  if (blob.size > 0) {
-    const downloadName = response.headers.get("content-disposition")?.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i)?.[1]
-      ? decodeURIComponent(
-          response.headers.get("content-disposition")?.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i)?.[1] ?? "",
-        )
-      : request.sourceFileName ?? "canopy-height-model.tif";
-    downloadBlob(blob, downloadName);
-  }
-
-  return null;
+): Promise<CanopyExtractionJob> {
+  return createChmJob(request.geometry);
 }

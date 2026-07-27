@@ -1,9 +1,35 @@
 import GeoTIFFSource from "ol/source/GeoTIFF";
 import WebGLTile from "ol/layer/WebGLTile";
 
+const CANOPY_COLOR_STOPS: Array<{ value: number; color: [number, number, number, number] }> = [
+  { value: 0, color: [0, 0, 0, 0] },
+  { value: 1, color: [30, 120, 45, 0.7] },
+  { value: 15, color: [85, 180, 70, 0.8] },
+  { value: 30, color: [180, 210, 80, 0.85] },
+  { value: 45, color: [245, 175, 55, 0.9] },
+  { value: 60, color: [220, 75, 35, 0.95] },
+];
+
+const DEFAULT_CANOPY_OPACITY = 0.95;
+
 export interface GeoTIFFLayerResult {
   layer: WebGLTile;
   source: GeoTIFFSource;
+}
+
+function buildCanopyColorRampExpression() {
+  const expression: Array<number | string | (number | string)[]> = [
+    "interpolate",
+    ["linear"],
+    ["band", 1],
+  ];
+
+  for (const stop of CANOPY_COLOR_STOPS) {
+    expression.push(stop.value);
+    expression.push(["color", ...stop.color]);
+  }
+
+  return expression;
 }
 
 export async function createGeoTIFFLayer(
@@ -13,55 +39,38 @@ export async function createGeoTIFFLayer(
   try {
     console.log("Creating GeoTIFF layer for URL:", url);
 
-    // Extract the S3 key from the URL (remove bucket name)
-    // URL format: https://s3.us-east-1.amazonaws.com/dataforgood-fb-data/forests/...
-    // We need: forests/v2/global/dinov3_global_chm_v2_ml3/...
-    const fullPath = url.split("amazonaws.com/")[1];
-    if (!fullPath) {
-      throw new Error(`Invalid S3 URL: ${url}`);
-    }
-    
-    // Remove the bucket name (first path segment)
-    const key = fullPath.split("/").slice(1).join("/");
-    if (!key) {
-      throw new Error(`Could not extract key from URL: ${url}`);
+    let sourceConfig: { url?: string; blob?: Blob };
+
+    // Support both blob URLs and direct static URLs from /public.
+    if (url.startsWith("blob:")) {
+      console.log("Fetching blob URL to get Blob object:", url);
+      const response = await fetch(url);
+      const blob = await response.blob();
+      console.log("Blob fetched, size:", blob.size);
+      sourceConfig = { blob };
+    } else {
+      sourceConfig = { url };
+      console.log("Using direct GeoTIFF URL:", sourceConfig.url);
     }
 
-    // Use the proxy endpoint for CORS-safe access
-    const proxyUrl = `/api/geofile?key=${encodeURIComponent(key)}`;
-    console.log("Using proxy URL:", proxyUrl);
-
-    // Create GeoTIFF source with the proxy URL
+    // Create GeoTIFF source with either blob or URL
     const source = new GeoTIFFSource({
-      sources: [
-        {
-          url: proxyUrl,
-        },
-      ],
+      sources: [sourceConfig],
+      normalize: false,
     });
     console.log("GeoTIFFSource created");
 
-    // Create WebGLTile layer with color mapping for canopy height
     const layer = new WebGLTile({
       source,
       style: {
-        color: [
-          "interpolate",
-          ["linear"],
-          ["band", 1],
-          0, "#000000",      // 0m - black
-          10, "#006600",     // 10m - dark green
-          20, "#00cc00",     // 20m - green
-          30, "#ccff00",     // 30m - yellow-green
-          40, "#ffcc00",     // 40m - yellow
-          50, "#ff8800",     // 50m - orange
-          60, "#ff0000",     // 60m+ - red
-        ],
+        color: buildCanopyColorRampExpression(),
       },
       properties: {
         name: layerName,
         isCanopyLayer: true,
       },
+      opacity: DEFAULT_CANOPY_OPACITY,
+      zIndex: 1000,
     });
     
     console.log("WebGLTile layer created:", layerName);
@@ -72,3 +81,5 @@ export async function createGeoTIFFLayer(
     return null;
   }
 }
+
+export { CANOPY_COLOR_STOPS, DEFAULT_CANOPY_OPACITY };

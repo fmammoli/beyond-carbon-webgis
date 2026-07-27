@@ -65,8 +65,8 @@ export function TimeSlider({
   }, [canAdvance, isPlaying, maxYear, onPlayingChange, onYearChange, year]);
 
   return (
-    <Card className="w-[min(96vw,36rem)] border-white/25 bg-card/85 shadow-lg backdrop-blur-sm">
-      <CardContent className="flex items-center gap-1.5 py-2">
+    <Card className="w-[min(95vw,34rem)] rounded-2xl border-white/45 bg-white/72 shadow-xl shadow-black/20 backdrop-blur-md">
+      <CardContent className="flex items-center gap-1.5 py-1.5">
         <span className="sr-only">Landcover timeline</span>
         <CalendarRange aria-hidden="true" className="shrink-0 text-muted-foreground" />
         <Button

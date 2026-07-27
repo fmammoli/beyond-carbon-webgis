@@ -14,10 +14,13 @@ import { MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP } from "@/lib/mapbiomas-colors";
 
 export type PmtilesRenderMode = "classified" | "raw-codes";
 
+// Guaranteed transparent 1x1 GIF used when a PMTiles tile is missing/out-of-range.
 const EMPTY_TILE_DATA_URI =
-  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+  "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
 const BLACK_TRANSPARENCY_THRESHOLD = 8;
-const WHITE_TRANSPARENCY_THRESHOLD = 247;
+const WHITE_TRANSPARENCY_THRESHOLD = 240;
+const BRIGHT_BACKGROUND_MIN_CHANNEL = 220;
+const BRIGHT_BACKGROUND_MAX_CHROMA_DELTA = 24;
 const TRANSPARENT_CLASS_IDS = new Set([0, 27, 255]);
 const SORTED_CLASS_IDS = Object.keys(MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP)
   .map((value) => Number(value))
@@ -111,6 +114,16 @@ function getNearestKnownClassId(value: number): number | null {
   }
 
   return nearest;
+}
+
+function isBrightLowSaturationBackground(red: number, green: number, blue: number): boolean {
+  const minChannel = Math.min(red, green, blue);
+  if (minChannel < BRIGHT_BACKGROUND_MIN_CHANNEL) {
+    return false;
+  }
+
+  const maxChannel = Math.max(red, green, blue);
+  return maxChannel - minChannel <= BRIGHT_BACKGROUND_MAX_CHROMA_DELTA;
 }
 
 function getArchiveHeader(baseUrl: string, year: number): Promise<PmtilesZoomRange | null> {
@@ -300,11 +313,20 @@ async function createStyledTileObjectUrl(
     const green = pixels[index + 1];
     const blue = pixels[index + 2];
 
+    // Treat bright near-white pixels as nodata/background so pixels outside
+    // the valid landcover footprint remain transparent instead of white.
     if (
       red >= WHITE_TRANSPARENCY_THRESHOLD &&
       green >= WHITE_TRANSPARENCY_THRESHOLD &&
       blue >= WHITE_TRANSPARENCY_THRESHOLD
     ) {
+      pixels[index + 3] = 0;
+      continue;
+    }
+
+    // Compression artifacts can turn white nodata into very light gray/beige.
+    // Mask these bright low-saturation backgrounds as transparent as well.
+    if (isBrightLowSaturationBackground(red, green, blue)) {
       pixels[index + 3] = 0;
       continue;
     }
