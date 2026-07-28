@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { ChevronDown, ListTree } from "lucide-react";
 
+import { agbLegend } from "@/lib/agb-legend";
 import { MAPBIOMAS_CLASSES } from "@/lib/mapbiomas-colors";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +17,11 @@ type ActiveLegendLayer =
   | {
       id: string;
       kind: "landcover";
+      title: string;
+    }
+  | {
+      id: string;
+      kind: "agb";
       title: string;
     }
   | {
@@ -159,6 +165,31 @@ function LandcoverLegendPanel() {
   );
 }
 
+function AgbLegendPanel() {
+  const gradientStops = agbLegend.colors.join(", ");
+
+  return (
+    <div className="rounded-md border border-slate-200/80 bg-white p-2.5">
+      <div className="mb-2 text-sm font-medium tracking-tight text-slate-900">
+        Aboveground Biomass Density (AGB) Mg/ha
+      </div>
+      <div
+        className="h-10 rounded-sm border border-slate-200/80"
+        style={{ background: `linear-gradient(to right, ${gradientStops})` }}
+      />
+      <div className="mt-2 flex items-start justify-between gap-1 px-0.5 text-[10px] leading-none text-slate-700">
+        <span>0</span>
+        <span>50</span>
+        <span>100</span>
+        <span>150</span>
+        <span>200</span>
+        <span>250</span>
+        <span>&gt; 300</span>
+      </div>
+    </div>
+  );
+}
+
 function VectorLegendPanel({
   title,
   fillOpacity,
@@ -254,6 +285,10 @@ export function Legend({ open, onOpenChange, activeLayers }: LegendProps) {
               activeLayers.map((layer) => {
                 if (layer.kind === "landcover") {
                   return <LandcoverLegendPanel key={layer.id} />;
+                }
+
+                if (layer.kind === "agb") {
+                  return <AgbLegendPanel key={layer.id} />;
                 }
 
                 if (layer.kind === "vector") {

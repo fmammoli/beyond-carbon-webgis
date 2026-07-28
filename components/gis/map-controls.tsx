@@ -16,10 +16,14 @@ type MapControlsProps = {
   isBoundariesAndPlacesVisible: boolean;
   isLandcoverVisible: boolean;
   landcoverOpacity: number;
+  isAgbVisible: boolean;
+  agbOpacity: number;
   onSatelliteChange: (visible: boolean) => void;
   onBoundariesAndPlacesChange: (visible: boolean) => void;
   onLandcoverChange: (visible: boolean) => void;
   onLandcoverOpacityChange: (opacity: number) => void;
+  onAgbChange: (visible: boolean) => void;
+  onAgbOpacityChange: (opacity: number) => void;
   embedded?: boolean;
 };
 
@@ -111,10 +115,14 @@ export function MapControls({
   isBoundariesAndPlacesVisible,
   isLandcoverVisible,
   landcoverOpacity,
+  isAgbVisible,
+  agbOpacity,
   onSatelliteChange,
   onBoundariesAndPlacesChange,
   onLandcoverChange,
   onLandcoverOpacityChange,
+  onAgbChange,
+  onAgbOpacityChange,
   embedded = false,
 }: MapControlsProps) {
   const controlsContent = (
@@ -142,6 +150,16 @@ export function MapControls({
           onOpacityChange={onLandcoverOpacityChange}
           switchAriaLabel="Toggle landcover layer"
           sliderAriaLabel="Set landcover opacity"
+        />
+        <ToggleOpacityRow
+          icon={<Layers className="size-4" />}
+          label="Above Ground Biomass Layer"
+          checked={isAgbVisible}
+          opacity={agbOpacity}
+          onCheckedChange={onAgbChange}
+          onOpacityChange={onAgbOpacityChange}
+          switchAriaLabel="Toggle above ground biomass layer"
+          sliderAriaLabel="Set above ground biomass opacity"
         />
     </div>
   );

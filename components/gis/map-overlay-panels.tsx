@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Layers, MapPlus, Video } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Layers, MapPlus, Video } from "lucide-react";
 
 import { Legend, type ActiveLegendLayer } from "@/components/gis/legend";
 import { MapControls } from "@/components/gis/map-controls";
@@ -38,12 +38,16 @@ type MapTopPanelsProps = {
   isBoundariesAndPlacesVisible: boolean;
   isLandcoverVisible: boolean;
   landcoverOpacity: number;
+  isAgbVisible: boolean;
+  agbOpacity: number;
   activeLegendLayers: ActiveLegendLayer[];
   isLegendOpen: boolean;
   onSatelliteChange: (visible: boolean) => void;
   onBoundariesAndPlacesChange: (visible: boolean) => void;
   onLandcoverChange: (visible: boolean) => void;
   onLandcoverOpacityChange: (opacity: number) => void;
+  onAgbChange: (visible: boolean) => void;
+  onAgbOpacityChange: (opacity: number) => void;
   onLegendOpenChange: (open: boolean) => void;
   selectedPolygonInfo: SelectedPolygonInfo | null;
   canDownloadSelectedPolygon: boolean;
@@ -82,6 +86,14 @@ type HoverClassTooltipProps = {
   isVisible: boolean;
 };
 
+type HoverAgbTooltipProps = {
+  rawValue: number;
+  scaledValue: number;
+  color: string;
+  hoverTooltipStyle: CSSProperties | null;
+  isVisible: boolean;
+};
+
 type HoveredVectorInfo = {
   layerName: string;
   groupingColumn: string | null;
@@ -95,6 +107,7 @@ type SelectedPolygonInfo = {
   properties: Array<{ key: string; value: string }>;
   areaSquareKilometers: number | null;
   areaHectares: number | null;
+  precomputedLandcoverStats: LandcoverStatsResult | null;
 };
 
 type LandcoverStatsJobViewState = {
@@ -150,12 +163,16 @@ export function MapTopPanels({
   isBoundariesAndPlacesVisible,
   isLandcoverVisible,
   landcoverOpacity,
+  isAgbVisible,
+  agbOpacity,
   activeLegendLayers,
   isLegendOpen,
   onSatelliteChange,
   onBoundariesAndPlacesChange,
   onLandcoverChange,
   onLandcoverOpacityChange,
+  onAgbChange,
+  onAgbOpacityChange,
   onLegendOpenChange,
   selectedPolygonInfo,
   canDownloadSelectedPolygon,
@@ -206,10 +223,14 @@ export function MapTopPanels({
                       isBoundariesAndPlacesVisible={isBoundariesAndPlacesVisible}
                       isLandcoverVisible={isLandcoverVisible}
                       landcoverOpacity={landcoverOpacity}
+                      isAgbVisible={isAgbVisible}
+                      agbOpacity={agbOpacity}
                       onSatelliteChange={onSatelliteChange}
                       onBoundariesAndPlacesChange={onBoundariesAndPlacesChange}
                       onLandcoverChange={onLandcoverChange}
                       onLandcoverOpacityChange={onLandcoverOpacityChange}
+                      onAgbChange={onAgbChange}
+                      onAgbOpacityChange={onAgbOpacityChange}
                       embedded
                     />
                   </CardContent>
@@ -217,7 +238,7 @@ export function MapTopPanels({
                 {hasCommunityPanel ? (
                   <TabsContent value="community" className="min-h-0 flex-1 overflow-hidden pb-0 pt-1">
                     <CardContent className="min-h-0 h-full overflow-hidden px-0 pb-0 pt-0">
-                      <div className="min-h-0 h-full rounded-md border border-cyan-200/60 bg-cyan-50/40 p-2">
+                      <div className="flex min-h-0 h-full rounded-md border border-cyan-200/60 bg-cyan-50/40 p-2">
                         {primaryAction}
                       </div>
                     </CardContent>
@@ -226,7 +247,7 @@ export function MapTopPanels({
                 {hasExportsPanel ? (
                   <TabsContent value="exports" className="min-h-0 flex-1 overflow-hidden pb-0 pt-1">
                     <CardContent className="min-h-0 h-full overflow-hidden px-0 pb-0 pt-0">
-                      <div className="min-h-0 h-full rounded-md border border-cyan-200/60 bg-cyan-50/40 p-2">
+                      <div className="flex min-h-0 h-full rounded-md border border-cyan-200/60 bg-cyan-50/40 p-2">
                         {exportsAction}
                       </div>
                     </CardContent>
@@ -240,10 +261,14 @@ export function MapTopPanels({
                   isBoundariesAndPlacesVisible={isBoundariesAndPlacesVisible}
                   isLandcoverVisible={isLandcoverVisible}
                   landcoverOpacity={landcoverOpacity}
+                  isAgbVisible={isAgbVisible}
+                  agbOpacity={agbOpacity}
                   onSatelliteChange={onSatelliteChange}
                   onBoundariesAndPlacesChange={onBoundariesAndPlacesChange}
                   onLandcoverChange={onLandcoverChange}
                   onLandcoverOpacityChange={onLandcoverOpacityChange}
+                  onAgbChange={onAgbChange}
+                  onAgbOpacityChange={onAgbOpacityChange}
                   embedded
                 />
               </CardContent>
@@ -297,16 +322,19 @@ function SelectedPolygonInfoPanel({
   onCancelLandcoverStats: () => void;
   landcoverStatsJob: LandcoverStatsJobViewState;
 }) {
+  const hasPrecomputedStats = Boolean(selectedPolygon?.precomputedLandcoverStats);
+  const displayedStatsResult = selectedPolygon?.precomputedLandcoverStats ?? landcoverStatsJob.result;
   const isStatsActive = landcoverStatsJob.status === "submitting" || landcoverStatsJob.status === "queued" || landcoverStatsJob.status === "running";
   const isBaselineYearValid = Number.isInteger(landcoverStatsBaselineYear);
   const isYearPairValid = isBaselineYearValid && landcoverStatsBaselineYear !== comparisonYear;
-  const canStartStats = Boolean(selectedPolygon) && isYearPairValid && !isStatsActive;
+  const canStartStats = Boolean(selectedPolygon) && !hasPrecomputedStats && isYearPairValid && !isStatsActive;
   const [isAreaOpen, setIsAreaOpen] = useState(true);
-  const [isPropertiesOpen, setIsPropertiesOpen] = useState(true);
+  const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
   const [isStatsOpen, setIsStatsOpen] = useState(true);
   const [isStatsResultOpen, setIsStatsResultOpen] = useState(true);
   const [isStatsMetadataOpen, setIsStatsMetadataOpen] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const selectedTitle = selectedPolygon?.layerName ?? "Selected Polygon";
   const statsActionLabel = isStatsActive
     ? landcoverStatsJob.status === "submitting"
       ? "Submitting..."
@@ -317,31 +345,56 @@ function SelectedPolygonInfoPanel({
       ? "Retry stats"
       : "Run landcover stats";
 
-  const statRows = landcoverStatsJob.result
+  const statRows = displayedStatsResult
     ? [
-        ["Baseline year", landcoverStatsJob.result.baselineYear === undefined ? "N/A" : String(landcoverStatsJob.result.baselineYear)],
-        ["Comparison year", landcoverStatsJob.result.comparisonYear === undefined ? "N/A" : String(landcoverStatsJob.result.comparisonYear)],
-        ["Forest loss", `${formatStatsNumber(landcoverStatsJob.result.forestLossHa, 2)} ha`],
-        ["Forest loss (%)", landcoverStatsJob.result.forestLossPct === undefined ? "N/A" : `${formatStatsNumber(landcoverStatsJob.result.forestLossPct, 3)}%`],
-        ["Forest gain", `${formatStatsNumber(landcoverStatsJob.result.forestGainHa, 2)} ha`],
-        ["Forest gain (%)", landcoverStatsJob.result.forestGainPct === undefined ? "N/A" : `${formatStatsNumber(landcoverStatsJob.result.forestGainPct, 3)}%`],
-        ["Net change", `${formatStatsNumber(landcoverStatsJob.result.netForestChangeHa, 2)} ha`],
-        ["Baseline forest area", `${formatStatsNumber(landcoverStatsJob.result.baselineForestAreaHa, 2)} ha`],
-        ["Comparison forest area", `${formatStatsNumber(landcoverStatsJob.result.comparisonForestAreaHa, 2)} ha`],
-        ["Analyzed area", `${formatStatsNumber(landcoverStatsJob.result.analyzedAreaHa, 2)} ha`],
-        ["AOI area", `${formatStatsNumber(landcoverStatsJob.result.aoiAreaHa, 2)} ha`],
-        ["Coverage fraction", formatStatsNumber(landcoverStatsJob.result.coverageFraction, 3)],
-        ["Valid pixels", new Intl.NumberFormat("en-US").format(landcoverStatsJob.result.validPixelCount)],
+        ["Baseline year", displayedStatsResult.baselineYear === undefined ? "N/A" : String(displayedStatsResult.baselineYear)],
+        ["Comparison year", displayedStatsResult.comparisonYear === undefined ? "N/A" : String(displayedStatsResult.comparisonYear)],
+        ["Forest loss", `${formatStatsNumber(displayedStatsResult.forestLossHa, 2)} ha`],
+        ["Forest loss (%)", displayedStatsResult.forestLossPct === undefined ? "N/A" : `${formatStatsNumber(displayedStatsResult.forestLossPct, 3)}%`],
+        ["Forest gain", `${formatStatsNumber(displayedStatsResult.forestGainHa, 2)} ha`],
+        ["Forest gain (%)", displayedStatsResult.forestGainPct === undefined ? "N/A" : `${formatStatsNumber(displayedStatsResult.forestGainPct, 3)}%`],
+        ["Net change", `${formatStatsNumber(displayedStatsResult.netForestChangeHa, 2)} ha`],
+        ["Baseline forest area", `${formatStatsNumber(displayedStatsResult.baselineForestAreaHa, 2)} ha`],
+        ["Comparison forest area", `${formatStatsNumber(displayedStatsResult.comparisonForestAreaHa, 2)} ha`],
+        ["Analyzed area", `${formatStatsNumber(displayedStatsResult.analyzedAreaHa, 2)} ha`],
+        ["AOI area", `${formatStatsNumber(displayedStatsResult.aoiAreaHa, 2)} ha`],
+        ["Coverage fraction", formatStatsNumber(displayedStatsResult.coverageFraction, 3)],
+        ["Valid pixels", new Intl.NumberFormat("en-US").format(displayedStatsResult.validPixelCount)],
       ]
     : [];
 
   return (
     <Collapsible open={isPanelOpen} onOpenChange={setIsPanelOpen}>
       <div className="w-[min(92vw,18rem)] rounded-xl border border-cyan-200/70 bg-cyan-50/90 p-3 text-[13px] shadow-lg backdrop-blur-sm">
-        <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 text-left">
-          <div className="text-base font-semibold text-cyan-950 md:text-[17px]">Selected Polygon</div>
-          {isPanelOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-        </CollapsibleTrigger>
+        <div className="flex w-full items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1">
+            <div className="min-w-0 truncate text-base font-semibold text-cyan-950 md:text-[17px]" title={selectedTitle}>
+              {selectedTitle}
+            </div>
+            {selectedPolygon ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                className="h-7 w-7 border-cyan-300 bg-white/90 text-cyan-900 hover:bg-cyan-100"
+                onClick={onDownloadSelectedPolygonGeoJson}
+                disabled={!canDownloadSelectedPolygon}
+                aria-label="Download polygon as GeoJSON"
+                title="Download polygon as GeoJSON"
+              >
+                <Download className="size-3.5" />
+              </Button>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-1">
+            <CollapsibleTrigger
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-cyan-900 hover:bg-cyan-100"
+              aria-label={isPanelOpen ? "Collapse selected polygon panel" : "Expand selected polygon panel"}
+            >
+              {isPanelOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+            </CollapsibleTrigger>
+          </div>
+        </div>
 
         <CollapsibleContent className="mt-1 max-h-[calc(100dvh-10rem)] overflow-y-auto pr-1 md:max-h-[calc(100dvh-11rem)]">
           {!selectedPolygon ? (
@@ -350,8 +403,7 @@ function SelectedPolygonInfoPanel({
             </p>
           ) : (
             <>
-          <div className="mt-1.5 text-xs text-cyan-900/80">Layer: {selectedPolygon.layerName}</div>
-          <div className="mt-1 text-xs text-cyan-900/80">
+          <div className="mt-1.5 text-xs text-cyan-900/80">
             {selectedPolygon.groupingColumn
               ? `${selectedPolygon.groupingColumn}: ${selectedPolygon.groupingValue}`
               : `Group: ${selectedPolygon.groupingValue}`}
@@ -389,7 +441,7 @@ function SelectedPolygonInfoPanel({
               </CollapsibleTrigger>
               <CollapsibleContent className="px-2 pb-1.5">
                 {selectedPolygon.properties.length > 0 ? (
-                  <div className="max-h-52 space-y-0.5 overflow-y-auto pr-1">
+                  <div className="space-y-0.5">
                     {selectedPolygon.properties.map((entry) => (
                       <div key={`${entry.key}:${entry.value}`} className="flex items-start justify-between gap-2 text-xs text-cyan-950">
                         <span className="text-cyan-900/75">{entry.key}</span>
@@ -404,19 +456,6 @@ function SelectedPolygonInfoPanel({
             </div>
           </Collapsible>
 
-          <div className="mt-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-7 w-full border-cyan-300 bg-white/90 text-[11px] text-cyan-900 hover:bg-cyan-100"
-              onClick={onDownloadSelectedPolygonGeoJson}
-              disabled={!canDownloadSelectedPolygon}
-            >
-              Download Polygon as GeoJSON
-            </Button>
-          </div>
-
           <Collapsible open={isStatsOpen} onOpenChange={setIsStatsOpen}>
             <div className="mt-2 rounded-md border border-cyan-200/70 bg-white/75 text-xs text-cyan-950">
               <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left">
@@ -427,49 +466,57 @@ function SelectedPolygonInfoPanel({
                 </div>
               </CollapsibleTrigger>
               <CollapsibleContent className="px-2 pb-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <label className="text-cyan-900/75" htmlFor="landcover-stats-baseline-year">Baseline year</label>
-                  <input
-                    id="landcover-stats-baseline-year"
-                    type="number"
-                    min={1900}
-                    max={comparisonYear - 1}
-                    value={Number.isFinite(landcoverStatsBaselineYear) ? landcoverStatsBaselineYear : 1990}
-                    onChange={(event) => onLandcoverStatsBaselineYearChange(Number.parseInt(event.target.value, 10))}
-                    className="h-7 w-20 rounded-md border border-cyan-200 bg-white px-2 text-right font-mono text-xs text-cyan-950 outline-none ring-offset-cyan-50 focus:ring-2 focus:ring-cyan-300"
-                  />
-                </div>
+                {!hasPrecomputedStats ? (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-cyan-900/75" htmlFor="landcover-stats-baseline-year">Baseline year</label>
+                      <input
+                        id="landcover-stats-baseline-year"
+                        type="number"
+                        min={1900}
+                        max={comparisonYear - 1}
+                        value={Number.isFinite(landcoverStatsBaselineYear) ? landcoverStatsBaselineYear : 1990}
+                        onChange={(event) => onLandcoverStatsBaselineYearChange(Number.parseInt(event.target.value, 10))}
+                        className="h-7 w-20 rounded-md border border-cyan-200 bg-white px-2 text-right font-mono text-xs text-cyan-950 outline-none ring-offset-cyan-50 focus:ring-2 focus:ring-cyan-300"
+                      />
+                    </div>
 
-                {!isYearPairValid ? (
-                  <div className="mt-1 text-xs text-amber-700">Baseline year must differ from the comparison year.</div>
-                ) : null}
+                    {!isYearPairValid ? (
+                      <div className="mt-1 text-xs text-amber-700">Baseline year must differ from the comparison year.</div>
+                    ) : null}
 
-                <div className="mt-2 flex items-center gap-2">
-                  {isStatsActive ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 flex-1 border-cyan-300 bg-white/90 text-xs text-cyan-900 hover:bg-cyan-100"
-                      onClick={onCancelLandcoverStats}
-                    >
-                      Cancel
-                    </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 flex-1 border-cyan-300 bg-white/90 text-xs text-cyan-900 hover:bg-cyan-100"
-                      onClick={onRunLandcoverStats}
-                      disabled={!canStartStats}
-                    >
-                      {statsActionLabel}
-                    </Button>
-                  )}
-                </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      {isStatsActive ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 flex-1 border-cyan-300 bg-white/90 text-xs text-cyan-900 hover:bg-cyan-100"
+                          onClick={onCancelLandcoverStats}
+                        >
+                          Cancel
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 flex-1 border-cyan-300 bg-white/90 text-xs text-cyan-900 hover:bg-cyan-100"
+                          onClick={onRunLandcoverStats}
+                          disabled={!canStartStats}
+                        >
+                          {statsActionLabel}
+                        </Button>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-1 rounded-md border border-cyan-200/70 bg-cyan-50 px-2 py-1 text-xs text-cyan-900/80">
+                    {"Stats are loaded from this polygon's GeoJSON properties."}
+                  </div>
+                )}
 
-                {landcoverStatsJob.message || landcoverStatsJob.error || isStatsActive || landcoverStatsJob.status === "succeeded" ? (
+                {(!hasPrecomputedStats && (landcoverStatsJob.message || landcoverStatsJob.error || isStatsActive || landcoverStatsJob.status === "succeeded")) ? (
                   <div className="mt-2 space-y-1">
                     <div className="flex items-start justify-between gap-2">
                       <span className="text-cyan-900/75">Status</span>
@@ -509,7 +556,7 @@ function SelectedPolygonInfoPanel({
                       </div>
                     ) : null}
 
-                    {landcoverStatsJob.result ? (
+                    {displayedStatsResult ? (
                       <div className="rounded-md border border-cyan-200/70 bg-cyan-50/80 px-2 py-1.5">
                         <Collapsible open={isStatsResultOpen} onOpenChange={setIsStatsResultOpen}>
                           <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 text-left text-xs font-semibold text-cyan-900">
@@ -526,7 +573,7 @@ function SelectedPolygonInfoPanel({
                           </CollapsibleContent>
                         </Collapsible>
 
-                        {landcoverStatsJob.result.metadata ? (
+                        {displayedStatsResult.metadata ? (
                           <Collapsible open={isStatsMetadataOpen} onOpenChange={setIsStatsMetadataOpen}>
                             <div className="mt-1 rounded-md border border-cyan-200/70 bg-white/85 px-2 py-1">
                               <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 text-left">
@@ -535,7 +582,7 @@ function SelectedPolygonInfoPanel({
                               </CollapsibleTrigger>
                               <CollapsibleContent>
                                 <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-words pr-1 text-xs leading-snug text-cyan-950">
-{JSON.stringify(landcoverStatsJob.result.metadata, null, 2)}
+{JSON.stringify(displayedStatsResult.metadata, null, 2)}
                                 </pre>
                               </CollapsibleContent>
                             </div>
@@ -543,6 +590,48 @@ function SelectedPolygonInfoPanel({
                         ) : null}
                       </div>
                     ) : null}
+                  </div>
+                ) : null}
+
+                {hasPrecomputedStats && displayedStatsResult ? (
+                  <div className="mt-2 space-y-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-cyan-900/75">Status</span>
+                      <span className="text-right font-medium">Precomputed</span>
+                    </div>
+
+                    <div className="rounded-md border border-cyan-200/70 bg-cyan-50/80 px-2 py-1.5">
+                      <Collapsible open={isStatsResultOpen} onOpenChange={setIsStatsResultOpen}>
+                        <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 text-left text-xs font-semibold text-cyan-900">
+                          <span>Result details</span>
+                          {isStatsResultOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-1 space-y-1">
+                          {statRows.map(([label, value]) => (
+                            <div key={label} className="flex items-start justify-between gap-2 text-xs">
+                              <span className="text-cyan-900/75">{label}</span>
+                              <span className="min-w-0 text-right font-medium">{value}</span>
+                            </div>
+                          ))}
+                        </CollapsibleContent>
+                      </Collapsible>
+
+                      {displayedStatsResult.metadata ? (
+                        <Collapsible open={isStatsMetadataOpen} onOpenChange={setIsStatsMetadataOpen}>
+                          <div className="mt-1 rounded-md border border-cyan-200/70 bg-white/85 px-2 py-1">
+                            <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 text-left">
+                              <div className="text-xs font-semibold uppercase tracking-wide text-cyan-900/70">Metadata</div>
+                              {isStatsMetadataOpen ? <ChevronDown className="size-3.5 text-cyan-900/70" /> : <ChevronRight className="size-3.5 text-cyan-900/70" />}
+                            </CollapsibleTrigger>
+                            <CollapsibleContent>
+                              <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-words pr-1 text-xs leading-snug text-cyan-950">
+{JSON.stringify(displayedStatsResult.metadata, null, 2)}
+                              </pre>
+                            </CollapsibleContent>
+                          </div>
+                        </Collapsible>
+                      ) : null}
+                    </div>
                   </div>
                 ) : null}
               </CollapsibleContent>
@@ -617,6 +706,37 @@ export function HoverClassTooltip({
           <div className="truncate text-white/75">{hoveredClass.labelId}</div>
         </div>
       </div>
+    </div>
+  );
+}
+
+export function HoverAgbTooltip({
+  rawValue,
+  scaledValue,
+  color,
+  hoverTooltipStyle,
+  isVisible,
+}: HoverAgbTooltipProps) {
+  if (!isVisible || !hoverTooltipStyle) {
+    return null;
+  }
+
+  return (
+    <div
+      className="pointer-events-none absolute z-40 max-w-56 rounded-md border border-white/35 bg-black/75 px-2.5 py-1.5 text-[11px] text-white shadow-lg backdrop-blur-sm duration-100 ease-out animate-in fade-in-0 zoom-in-95 slide-in-from-left-1 transition-[left,top]"
+      style={hoverTooltipStyle}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className="h-3 w-3 shrink-0 rounded-xs ring-1 ring-white/60"
+          style={{ backgroundColor: color }}
+        />
+        <div className="min-w-0 leading-tight">
+          <div className="truncate">agb</div>
+          <div className="truncate text-white/75">{scaledValue.toFixed(1)} Mg/ha</div>
+        </div>
+      </div>
+      <div className="mt-1 text-white/80">Raw pixel: {rawValue}</div>
     </div>
   );
 }

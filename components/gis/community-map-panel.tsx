@@ -48,6 +48,7 @@ export function CommunityMapPanel({
 }: CommunityMapPanelProps) {
   const panelContent = (
     <div className="space-y-2.5">
+      <div className="sticky top-0 z-20 space-y-2 bg-cyan-50/95 pb-2 backdrop-blur-sm">
         <div className="grid grid-cols-2 gap-1.5">
           <Button
             type="button"
@@ -90,6 +91,7 @@ export function CommunityMapPanel({
             Vertices placed: <span className="font-semibold text-cyan-950">{drawnVertexCount}</span>
           </div>
         ) : null}
+      </div>
 
         {items.length > 0 ? (
           <div className="space-y-1.5 border-t border-cyan-200/70 pt-2.5">
@@ -221,7 +223,11 @@ export function CommunityMapPanel({
   );
 
   if (embedded) {
-    return <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1">{panelContent}</div>;
+    return (
+      <div className="h-full min-h-0 space-y-2.5 overflow-y-auto pr-1 [-webkit-overflow-scrolling:touch]">
+        {panelContent}
+      </div>
+    );
   }
 
   return (

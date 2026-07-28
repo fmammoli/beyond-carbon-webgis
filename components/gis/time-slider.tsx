@@ -67,7 +67,7 @@ export function TimeSlider({
   return (
     <Card className="w-[min(95vw,34rem)] rounded-2xl border-white/45 bg-white/72 shadow-xl shadow-black/20 backdrop-blur-md">
       <CardContent className="flex items-center gap-1.5 py-1.5">
-        <span className="sr-only">Landcover timeline</span>
+        <span className="sr-only">Map layer timeline</span>
         <CalendarRange aria-hidden="true" className="shrink-0 text-muted-foreground" />
         <Button
           size="icon-xs"
@@ -137,7 +137,7 @@ export function TimeSlider({
               const nextValue = Array.isArray(value) ? value[0] : value;
               onYearChange(Math.round(nextValue ?? year));
             }}
-            aria-label="Select landcover year"
+            aria-label="Select layer year"
             aria-busy={isFrameLoading || (isPlaying && !canAdvance) || isPreloadingYears}
           />
         </div>

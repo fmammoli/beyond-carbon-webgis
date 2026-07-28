@@ -8,6 +8,7 @@ import type XYZ from "ol/source/XYZ";
 import {
   createPmtilesXyzSource,
   prefetchAdjacentPmtiles,
+  type PmtilesArchiveOptions,
   type PmtilesRenderMode,
 } from "@/lib/pmtiles-source";
 
@@ -18,6 +19,7 @@ type PmtilesLayerProps = {
   opacity: number;
   renderMode: PmtilesRenderMode;
   baseUrl: string;
+  archiveOptions?: PmtilesArchiveOptions;
   prefetchNeighbors?: boolean;
   onLayerReady?: (layer: TileLayer<XYZ> | null) => void;
   onFrameLoadingChange?: (loading: boolean) => void;
@@ -31,6 +33,7 @@ export function PmtilesLayer({
   opacity,
   renderMode,
   baseUrl,
+  archiveOptions,
   prefetchNeighbors = true,
   onLayerReady,
   onFrameLoadingChange,
@@ -48,7 +51,7 @@ export function PmtilesLayer({
       return;
     }
 
-    const source = createPmtilesXyzSource(baseUrl, year, renderMode);
+    const source = createPmtilesXyzSource(baseUrl, year, renderMode, archiveOptions);
     const sourceCache = sourceCacheRef.current;
     sourceCache.set(getCacheKey(year, renderMode), source);
 
@@ -63,7 +66,7 @@ export function PmtilesLayer({
     onLayerReady?.(layer);
     map.addLayer(layer);
     if (prefetchNeighbors) {
-      prefetchAdjacentPmtiles(baseUrl, year);
+      prefetchAdjacentPmtiles(baseUrl, year, archiveOptions);
     }
 
     return () => {
@@ -84,6 +87,7 @@ export function PmtilesLayer({
       sourceCache.clear();
     };
   }, [
+    archiveOptions,
     baseUrl,
     map,
     onFrameLoadingChange,
@@ -103,7 +107,7 @@ export function PmtilesLayer({
 
     const cacheKey = getCacheKey(year, renderMode);
     const cachedSource = sourceCacheRef.current.get(cacheKey);
-    const source = cachedSource ?? createPmtilesXyzSource(baseUrl, year, renderMode);
+    const source = cachedSource ?? createPmtilesXyzSource(baseUrl, year, renderMode, archiveOptions);
 
     if (!cachedSource) {
       sourceCacheRef.current.set(cacheKey, source);
@@ -111,7 +115,7 @@ export function PmtilesLayer({
 
     if (activeLayer.getSource() === source) {
       if (prefetchNeighbors) {
-        prefetchAdjacentPmtiles(baseUrl, year);
+        prefetchAdjacentPmtiles(baseUrl, year, archiveOptions);
       }
       onYearFrameReady?.(year);
       return;
@@ -122,7 +126,7 @@ export function PmtilesLayer({
       onFrameLoadingChange?.(false);
       onYearFrameReady?.(year);
       if (prefetchNeighbors) {
-        prefetchAdjacentPmtiles(baseUrl, year);
+        prefetchAdjacentPmtiles(baseUrl, year, archiveOptions);
       }
       return;
     }
@@ -187,7 +191,7 @@ export function PmtilesLayer({
       onFrameLoadingChange?.(false);
       onYearFrameReady?.(year);
       if (prefetchNeighbors) {
-        prefetchAdjacentPmtiles(baseUrl, year);
+        prefetchAdjacentPmtiles(baseUrl, year, archiveOptions);
       }
     };
 
@@ -251,6 +255,7 @@ export function PmtilesLayer({
       }
     };
   }, [
+    archiveOptions,
     baseUrl,
     map,
     onFrameLoadingChange,

@@ -18,6 +18,7 @@ export type ThreatMapJobStatus =
   | "cancelled";
 
 export type ThreatMapPreset = "balanced" | "high";
+export type ThreatMapGeoJsonCrs = "EPSG:4326" | "EPSG:3857";
 
 export type ThreatMapJobError = {
   code: string;
@@ -51,12 +52,18 @@ export type ThreatMapJob = {
 
 export type CreateThreatMapJobRequest = {
   geojson: FeatureCollection<Geometry, GeoJsonProperties> | Feature<Geometry, GeoJsonProperties>;
+  geojsonCrs?: ThreatMapGeoJsonCrs;
   preset: ThreatMapPreset;
   width?: number;
   height?: number;
   fps?: number;
   frameDurationSeconds?: number;
   outputFormat?: ThreatMapOutputFormat;
+};
+
+type CreateThreatMapJobRequestWire = Omit<CreateThreatMapJobRequest, "geojsonCrs"> & {
+  geojsonCrs: ThreatMapGeoJsonCrs;
+  geojson_crs: ThreatMapGeoJsonCrs;
 };
 
 export type CreateThreatMapJobResponse = {
@@ -200,6 +207,81 @@ function hasPolygonGeometry(value: unknown): boolean {
 
   const features = (value as FeatureCollection<Geometry, GeoJsonProperties>).features;
   return features.some((feature) => isPolygonGeometryType(feature.geometry?.type));
+}
+
+function collectGeometryCoordinates(geometry: Geometry): number[][] {
+  const flattened: number[][] = [];
+
+  const visit = (value: unknown) => {
+    if (!Array.isArray(value) || value.length === 0) {
+      return;
+    }
+
+    if (typeof value[0] === "number") {
+      const coordinate = value as number[];
+      if (coordinate.length >= 2) {
+        flattened.push([coordinate[0]!, coordinate[1]!]);
+      }
+      return;
+    }
+
+    for (const child of value) {
+      visit(child);
+    }
+  };
+
+  switch (geometry.type) {
+    case "GeometryCollection":
+      for (const child of geometry.geometries) {
+        flattened.push(...collectGeometryCoordinates(child));
+      }
+      return flattened;
+    default:
+      visit((geometry as Exclude<Geometry, { type: "GeometryCollection" }>).coordinates);
+      return flattened;
+  }
+}
+
+function inferGeojsonCrsFromPayload(
+  geojson: FeatureCollection<Geometry, GeoJsonProperties> | Feature<Geometry, GeoJsonProperties>,
+): ThreatMapGeoJsonCrs {
+  const geometries: Geometry[] = [];
+
+  if (geojson.type === "FeatureCollection") {
+    for (const feature of geojson.features) {
+      if (feature.geometry) {
+        geometries.push(feature.geometry);
+      }
+    }
+  } else if (geojson.geometry) {
+    geometries.push(geojson.geometry);
+  }
+
+  const coordinates = geometries.flatMap((geometry) => collectGeometryCoordinates(geometry));
+
+  if (coordinates.length === 0) {
+    return "EPSG:4326";
+  }
+
+  const looksLikeLonLat = coordinates.every(([x, y]) =>
+    Number.isFinite(x)
+      && Number.isFinite(y)
+      && x >= -180
+      && x <= 180
+      && y >= -90
+      && y <= 90);
+
+  return looksLikeLonLat ? "EPSG:4326" : "EPSG:3857";
+}
+
+function normalizeCreateThreatMapJobPayload(payload: CreateThreatMapJobRequest): CreateThreatMapJobRequestWire {
+  const geojsonCrs = payload.geojsonCrs ?? inferGeojsonCrsFromPayload(payload.geojson);
+
+  return {
+    ...payload,
+    geojsonCrs,
+    geojson_crs: geojsonCrs,
+  };
 }
 
 export function validateThreatMapRequest(payload: CreateThreatMapJobRequest): void {
@@ -513,6 +595,7 @@ export async function createThreatMapJob(
   options?: ThreatMapClientOptions,
 ): Promise<CreateThreatMapJobResponse> {
   validateThreatMapRequest(payload);
+  const payloadToSend = normalizeCreateThreatMapJobPayload(payload);
 
   const response = await fetch(resolveThreatMapUrl("/jobs", options?.baseUrl), {
     method: "POST",
@@ -521,7 +604,7 @@ export async function createThreatMapJob(
       apiKey: options?.apiKey,
       includeJsonContentType: true,
     }),
-    body: JSON.stringify(payload),
+    body: JSON.stringify(payloadToSend),
     signal: options?.signal,
   });
 

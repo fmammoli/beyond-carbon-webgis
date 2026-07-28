@@ -10,9 +10,21 @@ import {
   MAX_YEAR,
   MIN_YEAR,
 } from "@/lib/gis-constants";
+import {
+  AGB_TRANSPARENT_RAW_THRESHOLD,
+  getAgbDisplayColor,
+} from "@/lib/agb-legend";
 import { MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP } from "@/lib/mapbiomas-colors";
 
-export type PmtilesRenderMode = "classified" | "raw-codes";
+export type PmtilesRenderMode = "classified" | "raw-codes" | "ylgn";
+
+export type PmtilesArchiveOptions = {
+  filePrefix?: string;
+  fileSuffix?: string;
+  minYear?: number;
+  maxYear?: number;
+  flipY?: boolean;
+};
 
 // Guaranteed transparent 1x1 GIF used when a PMTiles tile is missing/out-of-range.
 const EMPTY_TILE_DATA_URI =
@@ -41,14 +53,30 @@ const archiveHeaderPromiseCache = new Map<string, Promise<PmtilesZoomRange | nul
 const allYearsPrefetchPromiseCache = new Map<string, Promise<void>>();
 const tilePrefetchPromiseCache = new Map<string, Promise<void>>();
 
+const DEFAULT_PMTILES_ARCHIVE_OPTIONS: Required<PmtilesArchiveOptions> = {
+  filePrefix: LANDCOVER_FILE_PREFIX,
+  fileSuffix: LANDCOVER_FILE_SUFFIX,
+  minYear: MIN_YEAR,
+  maxYear: MAX_YEAR,
+  flipY: LANDCOVER_FLIP_Y,
+};
+
 export type PmtilesTileRequest = {
   z: number;
   x: number;
   y: number;
 };
 
-function clampYear(year: number): number {
-  return Math.max(MIN_YEAR, Math.min(MAX_YEAR, year));
+function resolveArchiveOptions(options?: PmtilesArchiveOptions): Required<PmtilesArchiveOptions> {
+  return {
+    ...DEFAULT_PMTILES_ARCHIVE_OPTIONS,
+    ...options,
+  };
+}
+
+function clampYear(year: number, options?: PmtilesArchiveOptions): number {
+  const { minYear, maxYear } = resolveArchiveOptions(options);
+  return Math.max(minYear, Math.min(maxYear, year));
 }
 
 function detectMimeType(data: Uint8Array): string {
@@ -73,13 +101,14 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/$/, "");
 }
 
-function getArchiveUrl(baseUrl: string, year: number): string {
+function getArchiveUrl(baseUrl: string, year: number, options?: PmtilesArchiveOptions): string {
+  const { filePrefix, fileSuffix } = resolveArchiveOptions(options);
   const normalized = normalizeBaseUrl(baseUrl);
-  return `${normalized}/${LANDCOVER_FILE_PREFIX}${clampYear(year)}${LANDCOVER_FILE_SUFFIX}`;
+  return `${normalized}/${filePrefix}${clampYear(year, options)}${fileSuffix}`;
 }
 
-function getArchive(baseUrl: string, year: number): PMTiles {
-  const archiveUrl = getArchiveUrl(baseUrl, year);
+function getArchive(baseUrl: string, year: number, options?: PmtilesArchiveOptions): PMTiles {
+  const archiveUrl = getArchiveUrl(baseUrl, year, options);
   const cached = archiveCache.get(archiveUrl);
 
   if (cached) {
@@ -126,15 +155,19 @@ function isBrightLowSaturationBackground(red: number, green: number, blue: numbe
   return maxChannel - minChannel <= BRIGHT_BACKGROUND_MAX_CHROMA_DELTA;
 }
 
-function getArchiveHeader(baseUrl: string, year: number): Promise<PmtilesZoomRange | null> {
-  const archiveUrl = getArchiveUrl(baseUrl, year);
+function getArchiveHeader(
+  baseUrl: string,
+  year: number,
+  options?: PmtilesArchiveOptions,
+): Promise<PmtilesZoomRange | null> {
+  const archiveUrl = getArchiveUrl(baseUrl, year, options);
   const cachedPromise = archiveHeaderPromiseCache.get(archiveUrl);
 
   if (cachedPromise) {
     return cachedPromise;
   }
 
-  const archive = getArchive(baseUrl, year);
+  const archive = getArchive(baseUrl, year, options);
   const headerPromise = archive
     .getHeader()
     .then((header) => ({
@@ -188,12 +221,17 @@ function clampTileRequestToZoomRange(
   return { z: targetZ, x: targetX, y: targetY };
 }
 
-export function getPmtilesZoomRange(baseUrl: string, year: number): Promise<PmtilesZoomRange | null> {
-  return getArchiveHeader(baseUrl, year);
+export function getPmtilesZoomRange(
+  baseUrl: string,
+  year: number,
+  options?: PmtilesArchiveOptions,
+): Promise<PmtilesZoomRange | null> {
+  return getArchiveHeader(baseUrl, year, options);
 }
 
-function maybeFlipY(z: number, y: number): number {
-  if (!LANDCOVER_FLIP_Y) {
+function maybeFlipY(z: number, y: number, options?: PmtilesArchiveOptions): number {
+  const { flipY } = resolveArchiveOptions(options);
+  if (!flipY) {
     return y;
   }
 
@@ -312,6 +350,11 @@ async function createStyledTileObjectUrl(
     const red = pixels[index];
     const green = pixels[index + 1];
     const blue = pixels[index + 2];
+    const alpha = pixels[index + 3];
+
+    if (alpha === 0) {
+      continue;
+    }
 
     // Treat bright near-white pixels as nodata/background so pixels outside
     // the valid landcover footprint remain transparent instead of white.
@@ -331,21 +374,43 @@ async function createStyledTileObjectUrl(
       continue;
     }
 
-    if (canDecodeClasses && renderMode === "raw-codes") {
-      // Preserve encoded class values directly as grayscale for QA.
-      pixels[index] = red;
-      pixels[index + 1] = red;
-      pixels[index + 2] = red;
-      pixels[index + 3] = 255;
-      continue;
-    }
-
     if (
       red <= BLACK_TRANSPARENCY_THRESHOLD &&
       green <= BLACK_TRANSPARENCY_THRESHOLD &&
       blue <= BLACK_TRANSPARENCY_THRESHOLD
     ) {
       pixels[index + 3] = 0;
+      continue;
+    }
+
+    if (renderMode === "ylgn") {
+      const sourceValue = canDecodeClasses
+        ? red
+        : Math.round((red + green + blue) / 3);
+
+      if (sourceValue <= AGB_TRANSPARENT_RAW_THRESHOLD) {
+        pixels[index + 3] = 0;
+        continue;
+      }
+
+      const displayColor = getAgbDisplayColor(sourceValue);
+      const parsedColor = displayColor.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+
+      if (parsedColor) {
+        pixels[index] = Number(parsedColor[1]);
+        pixels[index + 1] = Number(parsedColor[2]);
+        pixels[index + 2] = Number(parsedColor[3]);
+      }
+      pixels[index + 3] = 255;
+      continue;
+    }
+
+    if (canDecodeClasses && renderMode === "raw-codes") {
+      // Preserve encoded class values directly as grayscale for QA.
+      pixels[index] = red;
+      pixels[index + 1] = red;
+      pixels[index + 2] = red;
+      pixels[index + 3] = 255;
       continue;
     }
 
@@ -395,8 +460,9 @@ export function createPmtilesXyzSource(
   baseUrl: string,
   year: number,
   renderMode: PmtilesRenderMode = "classified",
+  options?: PmtilesArchiveOptions,
 ): XYZ {
-  const sourceYear = clampYear(year);
+  const sourceYear = clampYear(year, options);
 
   return new XYZ({
     crossOrigin: "anonymous",
@@ -411,7 +477,7 @@ export function createPmtilesXyzSource(
       const x = tileCoord[1];
       // OpenLayers provides XYZ row indexing for this source.
       const xyzY = tileCoord[2];
-      const y = maybeFlipY(z, xyzY);
+      const y = maybeFlipY(z, xyzY, options);
       return `pmtiles://${sourceYear}/${z}/${x}/${y}`;
     },
     tileLoadFunction: async (tile, src) => {
@@ -428,8 +494,8 @@ export function createPmtilesXyzSource(
       }
 
       try {
-        const archive = getArchive(baseUrl, parsed.year);
-        const zoomRange = await getArchiveHeader(baseUrl, parsed.year);
+        const archive = getArchive(baseUrl, parsed.year, options);
+        const zoomRange = await getArchiveHeader(baseUrl, parsed.year, options);
 
         if (zoomRange && parsed.z > zoomRange.maxZoom + LANDCOVER_MAX_OVERZOOM_DELTA) {
           image.src = EMPTY_TILE_DATA_URI;
@@ -497,13 +563,17 @@ export function createPmtilesXyzSource(
   });
 }
 
-export function prefetchAdjacentPmtiles(baseUrl: string, year: number): void {
-  const prevYear = clampYear(year - 1);
-  const nextYear = clampYear(year + 1);
+export function prefetchAdjacentPmtiles(
+  baseUrl: string,
+  year: number,
+  options?: PmtilesArchiveOptions,
+): void {
+  const prevYear = clampYear(year - 1, options);
+  const nextYear = clampYear(year + 1, options);
 
   [prevYear, nextYear].forEach(async (candidateYear) => {
     try {
-      const archive = getArchive(baseUrl, candidateYear);
+      const archive = getArchive(baseUrl, candidateYear, options);
       await archive.getHeader();
     } catch {
       // Ignore prefetch failures: current year rendering should not be blocked.
@@ -511,17 +581,22 @@ export function prefetchAdjacentPmtiles(baseUrl: string, year: number): void {
   });
 }
 
-export function prefetchAllPmtilesYears(baseUrl: string): Promise<void> {
+export function prefetchAllPmtilesYears(
+  baseUrl: string,
+  options?: PmtilesArchiveOptions,
+): Promise<void> {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
-  const cachedPromise = allYearsPrefetchPromiseCache.get(normalizedBaseUrl);
+  const resolvedArchiveOptions = resolveArchiveOptions(options);
+  const cacheKey = `${normalizedBaseUrl}:${resolvedArchiveOptions.filePrefix}:${resolvedArchiveOptions.fileSuffix}:${resolvedArchiveOptions.minYear}:${resolvedArchiveOptions.maxYear}:${resolvedArchiveOptions.flipY}`;
+  const cachedPromise = allYearsPrefetchPromiseCache.get(cacheKey);
 
   if (cachedPromise) {
     return cachedPromise;
   }
 
   const years = Array.from(
-    { length: MAX_YEAR - MIN_YEAR + 1 },
-    (_, index) => MIN_YEAR + index,
+    { length: resolvedArchiveOptions.maxYear - resolvedArchiveOptions.minYear + 1 },
+    (_, index) => resolvedArchiveOptions.minYear + index,
   );
   const maxConcurrency = 4;
 
@@ -532,7 +607,7 @@ export function prefetchAllPmtilesYears(baseUrl: string): Promise<void> {
       await Promise.all(
         batch.map(async (candidateYear) => {
           try {
-            await getArchiveHeader(normalizedBaseUrl, candidateYear);
+            await getArchiveHeader(normalizedBaseUrl, candidateYear, options);
           } catch {
             // Ignore failures so one missing year does not block playback warmup.
           }
@@ -541,7 +616,7 @@ export function prefetchAllPmtilesYears(baseUrl: string): Promise<void> {
     }
   })();
 
-  allYearsPrefetchPromiseCache.set(normalizedBaseUrl, prefetchPromise);
+  allYearsPrefetchPromiseCache.set(cacheKey, prefetchPromise);
   return prefetchPromise;
 }
 
@@ -549,12 +624,14 @@ async function prefetchSinglePmtilesTile(
   baseUrl: string,
   year: number,
   tileRequest: PmtilesTileRequest,
+  options?: PmtilesArchiveOptions,
 ): Promise<void> {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   const z = Math.max(0, Math.round(tileRequest.z));
   const x = Math.max(0, Math.round(tileRequest.x));
   const y = Math.max(0, Math.round(tileRequest.y));
-  const requestKey = `${normalizedBaseUrl}:${year}:${z}:${x}:${y}`;
+  const resolvedArchiveOptions = resolveArchiveOptions(options);
+  const requestKey = `${normalizedBaseUrl}:${resolvedArchiveOptions.filePrefix}:${resolvedArchiveOptions.fileSuffix}:${resolvedArchiveOptions.minYear}:${resolvedArchiveOptions.maxYear}:${resolvedArchiveOptions.flipY}:${year}:${z}:${x}:${y}`;
   const cachedPromise = tilePrefetchPromiseCache.get(requestKey);
 
   if (cachedPromise) {
@@ -562,9 +639,9 @@ async function prefetchSinglePmtilesTile(
   }
 
   const prefetchPromise = (async () => {
-    const archive = getArchive(normalizedBaseUrl, year);
-    const zoomRange = await getArchiveHeader(normalizedBaseUrl, year);
-    const tileY = maybeFlipY(z, y);
+    const archive = getArchive(normalizedBaseUrl, year, options);
+    const zoomRange = await getArchiveHeader(normalizedBaseUrl, year, options);
+    const tileY = maybeFlipY(z, y, options);
     const clampedTile = clampTileRequestToZoomRange(z, x, tileY, zoomRange);
 
     if (!clampedTile) {
@@ -589,13 +666,16 @@ export async function prefetchViewportPmtilesYears(
   options?: {
     maxTiles?: number;
     maxConcurrency?: number;
+    archive?: PmtilesArchiveOptions;
   },
 ): Promise<void> {
   if (years.length === 0 || tileRequests.length === 0) {
     return;
   }
 
-  const uniqueYears = Array.from(new Set(years.map((year) => clampYear(year))));
+  const uniqueYears = Array.from(
+    new Set(years.map((year) => clampYear(year, options?.archive))),
+  );
   const uniqueTileRequests = Array.from(
     new Map(tileRequests.map((tile) => [`${tile.z}:${tile.x}:${tile.y}`, tile])).values(),
   );
@@ -607,7 +687,7 @@ export async function prefetchViewportPmtilesYears(
 
   uniqueYears.forEach((year) => {
     limitedTileRequests.forEach((tileRequest) => {
-      tasks.push(() => prefetchSinglePmtilesTile(baseUrl, year, tileRequest));
+      tasks.push(() => prefetchSinglePmtilesTile(baseUrl, year, tileRequest, options?.archive));
     });
   });
 
