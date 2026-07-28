@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Feature as GeoJsonFeature, FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
-import type Map from "ol/Map";
+import type OLMap from "ol/Map";
 import type MapBrowserEvent from "ol/MapBrowserEvent";
 import type { Coordinate } from "ol/coordinate";
+import type { Extent } from "ol/extent";
 import Feature from "ol/Feature";
 import GeoJSON from "ol/format/GeoJSON";
-import type BaseLayer from "ol/layer/Base";
+import type OlGeometry from "ol/geom/Geometry";
 import type TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
 import LineString from "ol/geom/LineString";
@@ -31,17 +32,8 @@ import {
   PLAY_PREFETCH_YEAR_WINDOW,
 } from "@/lib/gis-constants";
 import {
-  buildCommunityBoundaryGeoJson,
-  getAoiSquareSideKilometers,
   MAX_COMMUNITY_BOUNDARY_BUFFER_METERS,
 } from "@/lib/community-boundary";
-import {
-  createCanopyExtractionJob,
-  downloadChmResult,
-  pollChmJob,
-  type CanopyExtractionJobStatus,
-} from "@/lib/canopy-extract";
-import { createGeoTIFFLayer, DEFAULT_CANOPY_OPACITY } from "@/lib/geotiff-layer";
 import { MapCanvas, type MapCanvasReadyPayload } from "@/components/gis/map-canvas";
 import {
   CommunityMapPanel,
@@ -50,15 +42,17 @@ import {
 import {
   FloatingStatusMessage,
   HoverClassTooltip,
+  HoverVectorTooltip,
   MapBottomSlider,
+  OverlayHoverBoundary,
   MapTopPanels,
-  PixelInspectorPanel,
 } from "@/components/gis/map-overlay-panels";
 import type { ActiveLegendLayer } from "@/components/gis/legend";
-import type { CanopyLayerItem } from "@/components/gis/map-controls";
 import { PmtilesLayer } from "@/components/gis/pmtiles-layer";
 import { VectorDropzone, type VectorDropzoneHandle } from "@/components/gis/vector-dropzone";
-import { MAPBIOMAS_CLASS_LOOKUP, MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP } from "@/lib/mapbiomas-colors";
+import { useLandcoverStatsJob } from "@/hooks/use-landcover-stats-job";
+import { MAPBIOMAS_CLASS_LOOKUP, resolveMapbiomasClassCodeFromRgb } from "@/lib/mapbiomas-colors";
+import { formatLandcoverStatsError } from "@/lib/landcover-stats";
 import {
   getPmtilesZoomRange,
   prefetchAllPmtilesYears,
@@ -67,9 +61,15 @@ import {
   type PmtilesZoomRange,
 } from "@/lib/pmtiles-source";
 import { Button } from "@/components/ui/button";
+import {
+  buildGroupColorMap,
+  DEFAULT_GROUP_PALETTE,
+  EMPTY_GROUP_LABEL,
+  normalizeGroupValue,
+} from "@/lib/vector-grouping";
 
 type MapContextState = {
-  map: Map | null;
+  map: OLMap | null;
 };
 
 type HoverPixelInfo = {
@@ -85,29 +85,37 @@ type HoverPixelInfo = {
 };
 
 type VectorLayerState = {
-  layer: BaseLayer;
+  layer: VectorLayer<VectorSource>;
   isVisible: boolean;
   fillOpacity: number;
-  setFillOpacity: (opacity: number) => void;
+  availableGroupingColumns: string[];
+  groupingColumn: string | null;
+  groupingValueColors: Record<string, string>;
+  groupingValueCounts: Record<string, number>;
 };
 
-type CanopyLayerState = {
-  tileUrls: string[];
-  isLoading: boolean;
-  isVisible: boolean;
-  opacity: number;
-  layers?: BaseLayer[];
-  requestGeometry?: FeatureCollection<Geometry, GeoJsonProperties>;
-  jobId?: string;
-  jobStatus?: "idle" | CanopyExtractionJobStatus;
-  progress?: number | null;
-  etaSeconds?: number | null;
-  resultDownloadUrl?: string;
-  statusMessage?: string;
-  error?: {
-    code: string;
-    message: string;
-  };
+type HoveredVectorInfo = {
+  layerName: string;
+  groupingColumn: string | null;
+  groupingValue: string;
+  pixelX: number;
+  pixelY: number;
+};
+
+type SelectedVectorInfo = {
+  layerName: string;
+  groupingColumn: string | null;
+  groupingValue: string;
+  geometry: OlGeometry | null;
+  properties: Array<{ key: string; value: string }>;
+  areaSquareKilometers: number | null;
+  areaHectares: number | null;
+  selectionKey: string;
+};
+
+type AreaMetrics = {
+  areaSquareKilometers: number | null;
+  areaHectares: number | null;
 };
 
 type PendingPolygonConfirmState = {
@@ -127,6 +135,19 @@ const DEFAULT_VECTOR_FILL_OPACITY = 0.2;
 const DRAW_LAYER_Z_INDEX = 2300;
 const DRAW_CLOSE_TOLERANCE_PIXELS = 14;
 const MAX_COMMUNITY_BOUNDARY_BUFFER_KM = MAX_COMMUNITY_BOUNDARY_BUFFER_METERS / 1000;
+const DEFAULT_VECTOR_STROKE_COLOR = "#ff3b30";
+
+function rgbaFromHex(hexColor: string, alpha: number): string {
+  const sanitized = hexColor.replace("#", "");
+  if (sanitized.length !== 6) {
+    return `rgba(255, 59, 48, ${alpha})`;
+  }
+
+  const red = Number.parseInt(sanitized.slice(0, 2), 16);
+  const green = Number.parseInt(sanitized.slice(2, 4), 16);
+  const blue = Number.parseInt(sanitized.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
 
 const DRAW_POINT_STYLE = new Style({
   image: new CircleStyle({
@@ -160,24 +181,79 @@ const DRAW_POLYGON_PREVIEW_STYLE = new Style({
   fill: new Fill({ color: "rgba(15, 23, 42, 0.12)" }),
 });
 
-function createVectorStyle(fillOpacity: number): Style {
+function createVectorStyle(fillOpacity: number, color = DEFAULT_VECTOR_STROKE_COLOR): Style {
   return new Style({
     stroke: new Stroke({
-      color: "#ff3b30",
+      color,
       width: 2,
     }),
     fill: new Fill({
-      color: `rgba(255, 59, 48, ${fillOpacity})`,
+      color: rgbaFromHex(color, fillOpacity),
     }),
     image: new CircleStyle({
       radius: 5,
-      fill: new Fill({ color: "#ff3b30" }),
+      fill: new Fill({ color }),
       stroke: new Stroke({ color: "#ffffff", width: 1.5 }),
     }),
   });
 }
 
-function isNearFirstVertex(map: Map, first: Coordinate, candidate: Coordinate): boolean {
+function collectGroupingStats(
+  features: Feature<OlGeometry>[],
+  groupingColumn: string | null,
+): { valueCounts: Record<string, number>; valueColors: Record<string, string> } {
+  if (!groupingColumn) {
+    return {
+      valueCounts: {},
+      valueColors: {},
+    };
+  }
+
+  const normalizedValues = features.map((feature) => normalizeGroupValue(feature.get(groupingColumn)));
+  const counts = normalizedValues.reduce<Record<string, number>>((acc, value) => {
+    acc[value] = (acc[value] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  return {
+    valueCounts: counts,
+    valueColors: buildGroupColorMap(Object.keys(counts), DEFAULT_GROUP_PALETTE),
+  };
+}
+
+function applyVectorLayerStyle(
+  layer: VectorLayer<VectorSource>,
+  fillOpacity: number,
+  groupingColumn: string | null,
+  groupingValueColors: Record<string, string>,
+) {
+  const styleCache = new Map<string, Style>();
+
+  layer.setStyle((feature) => {
+    const featureGeometryType = feature.getGeometry()?.getType();
+    const groupValue = groupingColumn ? normalizeGroupValue(feature.get(groupingColumn)) : EMPTY_GROUP_LABEL;
+    const color = groupingColumn
+      ? (groupingValueColors[groupValue] ?? DEFAULT_VECTOR_STROKE_COLOR)
+      : DEFAULT_VECTOR_STROKE_COLOR;
+    const geometryBucket = featureGeometryType?.includes("Point")
+      ? "point"
+      : featureGeometryType?.includes("Line")
+        ? "line"
+        : "polygon";
+
+    const key = `${geometryBucket}:${color}:${fillOpacity}`;
+    const existing = styleCache.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const style = createVectorStyle(fillOpacity, color);
+    styleCache.set(key, style);
+    return style;
+  });
+}
+
+function isNearFirstVertex(map: OLMap, first: Coordinate, candidate: Coordinate): boolean {
   const [firstPxX, firstPxY] = map.getPixelFromCoordinate(first);
   const [candidatePxX, candidatePxY] = map.getPixelFromCoordinate(candidate);
   const dx = firstPxX - candidatePxX;
@@ -185,25 +261,7 @@ function isNearFirstVertex(map: Map, first: Coordinate, candidate: Coordinate): 
   return Math.sqrt(dx * dx + dy * dy) <= DRAW_CLOSE_TOLERANCE_PIXELS;
 }
 
-function resolveClassCodeFromRenderedRgb(red: number, green: number, blue: number): number | null {
-  const tolerance = 2;
-
-  for (const [codeText, color] of Object.entries(MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP)) {
-    const [targetRed, targetGreen, targetBlue] = color;
-    const isMatch =
-      Math.abs(targetRed - red) <= tolerance &&
-      Math.abs(targetGreen - green) <= tolerance &&
-      Math.abs(targetBlue - blue) <= tolerance;
-
-    if (isMatch) {
-      return Number(codeText);
-    }
-  }
-
-  return null;
-}
-
-function collectViewportTileRequests(map: Map, maxTiles: number): PmtilesTileRequest[] {
+function collectViewportTileRequests(map: OLMap, maxTiles: number): PmtilesTileRequest[] {
   const size = map.getSize();
   if (!size) {
     return [];
@@ -248,20 +306,6 @@ function formatKilometers(value: number): string {
     minimumFractionDigits: value >= 10 ? 1 : 2,
     maximumFractionDigits: value >= 10 ? 1 : 2,
   }).format(value);
-}
-
-function getAoiSideText(valueKm: number): string {
-  return `${formatKilometers(valueKm)} km`;
-}
-
-function formatCanopyError(error: { code?: string | null; message?: string | null } | null | undefined): string {
-  if (!error) {
-    return "Canopy extraction failed.";
-  }
-
-  const code = error.code?.trim() || "CHM_JOB_FAILED";
-  const message = error.message?.trim() || "Canopy extraction failed.";
-  return `${code}: ${message}`;
 }
 
 function calculatePolygonCentroid(vertices: Coordinate[]): Coordinate {
@@ -320,6 +364,28 @@ function calculatePolygonDraftMetrics(vertices: Coordinate[]): PolygonDraftMetri
   };
 }
 
+function getHoveredFeatureAreaMetrics(
+  geometry: OlGeometry | undefined,
+): AreaMetrics {
+  if (!geometry || !geometry.getType().includes("Polygon")) {
+    return {
+      areaSquareKilometers: null,
+      areaHectares: null,
+    };
+  }
+
+  const areaSquareMeters = Math.abs(
+    getGeodesicArea(geometry, {
+      projection: "EPSG:3857",
+    }),
+  );
+
+  return {
+    areaSquareKilometers: areaSquareMeters / 1_000_000,
+    areaHectares: areaSquareMeters / 10_000,
+  };
+}
+
 function createCenteredMaxSquareVertices(vertices: Coordinate[]): Coordinate[] {
   const [centerX, centerY] = calculatePolygonCentroid(vertices);
   const halfSide = MAX_COMMUNITY_BOUNDARY_BUFFER_METERS;
@@ -344,6 +410,10 @@ export default function MapContainer() {
   const [isFrameLoading, setIsFrameLoading] = useState(false);
   const [isPreloadingYears, setIsPreloadingYears] = useState(false);
   const [hoverPixelInfo, setHoverPixelInfo] = useState<HoverPixelInfo | null>(null);
+  const [hoveredVectorInfo, setHoveredVectorInfo] = useState<HoveredVectorInfo | null>(null);
+  const [isHoveringOverlayPanel, setIsHoveringOverlayPanel] = useState(false);
+  const [selectedVectorInfo, setSelectedVectorInfo] = useState<SelectedVectorInfo | null>(null);
+  const [landcoverStatsBaselineYear, setLandcoverStatsBaselineYear] = useState(1990);
   const [pmtilesZoomRangeState, setPmtilesZoomRangeState] = useState<{
     cacheKey: string;
     range: PmtilesZoomRange | null;
@@ -353,7 +423,6 @@ export default function MapContainer() {
     map: null,
   });
   const [vectorLayers, setVectorLayers] = useState<Record<string, VectorLayerState>>({});
-  const [canopyLayers, setCanopyLayers] = useState<Record<string, CanopyLayerState>>({});
   const [communityMapLayerNames, setCommunityMapLayerNames] = useState<string[]>([]);
   const [isDrawingPolygon, setIsDrawingPolygon] = useState(false);
   const [drawingVertices, setDrawingVertices] = useState<Coordinate[]>([]);
@@ -365,9 +434,10 @@ export default function MapContainer() {
   const drawingLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const communityPolygonCounterRef = useRef(1);
   const geojsonFormatRef = useRef(new GeoJSON());
-  const canopyJobGenerationRef = useRef<Record<string, number>>({});
-  const canopyJobControllersRef = useRef<Record<string, AbortController | null>>({});
-  const canopyLayersRef = useRef<Record<string, CanopyLayerState>>({});
+  const landcoverStatsJob = useLandcoverStatsJob({
+    baseUrl: process.env.NEXT_PUBLIC_LANDCOVER_STATS_API_BASE_URL,
+    apiKey: process.env.NEXT_PUBLIC_LANDCOVER_STATS_API_KEY,
+  });
 
   const pmtilesBaseUrl =
     process.env.NEXT_PUBLIC_R2_PMTILES_BASE_URL ?? DEFAULT_R2_PMTILES_BASE_URL;
@@ -379,427 +449,34 @@ export default function MapContainer() {
     });
   }, []);
 
-  useEffect(() => {
-    canopyLayersRef.current = canopyLayers;
-  }, [canopyLayers]);
-
-  const abortCanopyJobRequest = useCallback((fileName: string) => {
-    canopyJobControllersRef.current[fileName]?.abort();
-    canopyJobControllersRef.current[fileName] = null;
-  }, []);
-
-  const bumpCanopyJobGeneration = useCallback((fileName: string) => {
-    const nextGeneration = (canopyJobGenerationRef.current[fileName] ?? 0) + 1;
-    canopyJobGenerationRef.current[fileName] = nextGeneration;
-    abortCanopyJobRequest(fileName);
-    return nextGeneration;
-  }, [abortCanopyJobRequest]);
-
-  const revokeCanopyLayerTileUrls = useCallback((tileUrls?: string[]) => {
-    if (!tileUrls) {
+  const fitMapToCommunityPolygonExtent = useCallback((extent: Extent) => {
+    if (!mapContext.map) {
       return;
     }
 
-    for (const url of tileUrls) {
-      if (url.startsWith("blob:")) {
-        URL.revokeObjectURL(url);
-      }
-    }
-  }, []);
-
-  const disposeCanopyLayerArtifacts = useCallback((fileName: string, layerState?: CanopyLayerState) => {
-    if (layerState?.layers && mapContext.map) {
-      for (const layer of layerState.layers) {
-        mapContext.map.removeLayer(layer);
-      }
-    }
-
-    revokeCanopyLayerTileUrls(layerState?.tileUrls);
-    abortCanopyJobRequest(fileName);
-  }, [abortCanopyJobRequest, mapContext.map, revokeCanopyLayerTileUrls]);
-
-  const applyCanopyJobResult = useCallback(async (
-    fileName: string,
-    jobId: string,
-    jobResultUrl: string,
-    generation: number,
-  ) => {
-    const download = await downloadChmResult(jobResultUrl);
-    const blobUrl = URL.createObjectURL(download.blob);
-
-    if (canopyJobGenerationRef.current[fileName] !== generation) {
-      URL.revokeObjectURL(blobUrl);
+    const isValidExtent = extent.every((value) => Number.isFinite(value));
+    const hasArea = extent[0] < extent[2] && extent[1] < extent[3];
+    if (!isValidExtent || !hasArea) {
       return;
     }
 
-    const result = await createGeoTIFFLayer(blobUrl, fileName);
-    URL.revokeObjectURL(blobUrl);
+    const isDesktop = window.matchMedia("(min-width: 768px)").matches;
+    const padding = isDesktop ? [36, 40, 36, 320] : [120, 16, 104, 16];
+    const maxZoom = isDesktop ? 15 : 14;
 
-    if (!result || !mapContext.map) {
-      throw new Error("Unable to create GeoTIFF layer from canopy download.");
-    }
-
-    const { layer, source } = result;
-    mapContext.map.addLayer(layer);
-
-    if (canopyJobGenerationRef.current[fileName] !== generation) {
-      mapContext.map.removeLayer(layer);
-      return;
-    }
-
-    try {
-      const viewConfig = await source.getView();
-
-      if (viewConfig.extent) {
-        const existingView = mapContext.map.getView();
-        const mapSize = mapContext.map.getSize();
-
-        existingView.fit(viewConfig.extent, {
-          duration: 500,
-          padding: [24, 24, 24, 24],
-          size: mapSize,
-          maxZoom: 18,
-        });
-
-        const sourceMaxResolution =
-          Array.isArray(viewConfig.resolutions) &&
-          typeof viewConfig.resolutions[0] === "number"
-            ? viewConfig.resolutions[0]
-            : null;
-
-        if (sourceMaxResolution !== null) {
-          const currentResolution = existingView.getResolution();
-
-          if (typeof currentResolution === "number" && currentResolution > sourceMaxResolution) {
-            existingView.setResolution(sourceMaxResolution);
-          }
-        }
-      }
-    } catch (error) {
-      console.warn("Failed to set view from canopy GeoTIFF metadata:", error);
-    }
-
-    setCanopyLayers((prev) => {
-      const existing = prev[fileName];
-
-      if (!existing) {
-        mapContext.map?.removeLayer(layer);
-        return prev;
-      }
-
-      layer.setVisible(existing.isVisible);
-      layer.setOpacity(existing.opacity);
-
-      return {
-        ...prev,
-        [fileName]: {
-          ...existing,
-          tileUrls: [jobResultUrl],
-          isLoading: false,
-          isVisible: existing.isVisible,
-          opacity: existing.opacity,
-          layers: [layer],
-          requestGeometry: existing.requestGeometry,
-          jobId,
-          jobStatus: "succeeded",
-          progress: 100,
-          etaSeconds: 0,
-          resultDownloadUrl: jobResultUrl,
-          statusMessage: `Canopy extraction ready for ${fileName}.`,
-          error: undefined,
-        },
-      };
+    mapContext.map.getView().fit(extent, {
+      duration: 500,
+      maxZoom,
+      padding,
     });
-
-    setStatusMessage(`Canopy extraction ready for ${fileName}.`);
   }, [mapContext.map]);
-
-  const pollCanopyExtractionJob = useCallback(async function runCanopyExtractionPoll(
-    fileName: string,
-    jobId: string,
-    generation: number,
-    controller: AbortController,
-  ) {
-    if (canopyJobGenerationRef.current[fileName] !== generation) {
-      return;
-    }
-
-    try {
-      const job = await pollChmJob(jobId, {
-        initialIntervalMs: 2500,
-        maxIntervalMs: 10_000,
-        backoffIntervalMs: 10_000,
-        backoffMaxIntervalMs: 30_000,
-        signal: controller.signal,
-        onUpdate: (nextJob) => {
-          if (canopyJobGenerationRef.current[fileName] !== generation) {
-            return;
-          }
-
-          setCanopyLayers((prev) => {
-            const existing = prev[fileName];
-
-            if (!existing) {
-              return prev;
-            }
-
-            const nextStatusMessage =
-              nextJob.message ??
-              (nextJob.status === "queued"
-                ? `Queued canopy extraction for ${fileName}.`
-                : nextJob.status === "running"
-                  ? `Processing canopy extraction for ${fileName}...`
-                  : existing.statusMessage);
-
-            return {
-              ...prev,
-              [fileName]: {
-                ...existing,
-                jobId,
-                jobStatus: nextJob.status,
-                progress: nextJob.progress ?? null,
-                etaSeconds: nextJob.etaSeconds ?? null,
-                resultDownloadUrl: nextJob.result?.downloadUrl ?? existing.resultDownloadUrl,
-                statusMessage: nextStatusMessage,
-                isLoading: nextJob.status === "queued" || nextJob.status === "running",
-                error: nextJob.status === "failed"
-                  ? {
-                      code: nextJob.error?.code ?? "CHM_JOB_FAILED",
-                      message: nextJob.error?.message ?? nextJob.message ?? "Canopy extraction failed.",
-                    }
-                  : undefined,
-              },
-            };
-          });
-        },
-      });
-
-      if (canopyJobGenerationRef.current[fileName] !== generation) {
-        return;
-      }
-
-      if (job.status === "failed") {
-        const failureMessage = formatCanopyError(job.error ?? { message: job.message });
-        setStatusMessage(`Canopy extraction failed for ${fileName}: ${failureMessage}`);
-        return;
-      }
-
-      if (!job.result?.downloadUrl) {
-        throw new Error("Canopy extraction succeeded without a download URL.");
-      }
-
-      await applyCanopyJobResult(fileName, jobId, job.result.downloadUrl, generation);
-    } catch (error) {
-      if (canopyJobGenerationRef.current[fileName] !== generation) {
-        return;
-      }
-
-      if (error instanceof DOMException && error.name === "AbortError") {
-        return;
-      }
-
-      const message = error instanceof Error ? error.message : "Unknown extraction error.";
-
-      setCanopyLayers((prev) => {
-        const existing = prev[fileName];
-
-        if (!existing) {
-          return prev;
-        }
-
-        return {
-          ...prev,
-          [fileName]: {
-            ...existing,
-            isLoading: false,
-            jobStatus: "failed",
-            progress: null,
-            etaSeconds: null,
-            statusMessage: `Canopy extraction failed for ${fileName}: ${message}`,
-            error: {
-              code: "CHM_JOB_FAILED",
-              message,
-            },
-          },
-        };
-      });
-
-      setStatusMessage(`Canopy extraction failed for ${fileName}: ${message}`);
-    }
-  }, [applyCanopyJobResult]);
-
-  const queueCanopyExtractionForGeometry = useCallback((
-    fileName: string,
-    geometry?: FeatureCollection<Geometry, GeoJsonProperties>,
-  ) => {
-    if (!geometry) {
-      return;
-    }
-
-    const nextGeneration = bumpCanopyJobGeneration(fileName);
-    const existingLayerState = canopyLayersRef.current[fileName];
-    disposeCanopyLayerArtifacts(fileName, existingLayerState);
-
-    setCanopyLayers((prev) => {
-      return {
-        ...prev,
-        [fileName]: {
-          tileUrls: [],
-          isLoading: false,
-          isVisible: existingLayerState?.isVisible ?? true,
-          opacity: existingLayerState?.opacity ?? DEFAULT_CANOPY_OPACITY,
-          layers: undefined,
-          requestGeometry: geometry,
-          jobId: undefined,
-          jobStatus: "idle",
-          progress: null,
-          etaSeconds: null,
-          resultDownloadUrl: undefined,
-          statusMessage: `Canopy extraction ready for ${fileName}.`,
-          error: undefined,
-        },
-      };
-    });
-
-    setStatusMessage(`Canopy extraction ready for ${fileName}. Select Generate CHM in Layer Controls.`);
-
-    canopyJobGenerationRef.current[fileName] = nextGeneration;
-  }, [bumpCanopyJobGeneration, disposeCanopyLayerArtifacts]);
-
-  const startCanopyExtractionForGeometry = useCallback(async (
-    fileName: string,
-    geometry: FeatureCollection<Geometry, GeoJsonProperties>,
-  ) => {
-    const aoiSideKm = getAoiSquareSideKilometers(geometry);
-    const nextGeneration = bumpCanopyJobGeneration(fileName);
-    const existingLayerState = canopyLayersRef.current[fileName];
-    disposeCanopyLayerArtifacts(fileName, existingLayerState);
-
-    setCanopyLayers((prev) => {
-      return {
-        ...prev,
-        [fileName]: {
-          tileUrls: [],
-          isLoading: true,
-          isVisible: existingLayerState?.isVisible ?? true,
-          opacity: existingLayerState?.opacity ?? DEFAULT_CANOPY_OPACITY,
-          layers: undefined,
-          requestGeometry: geometry,
-          jobId: undefined,
-          jobStatus: "queued",
-          progress: null,
-          etaSeconds: null,
-          resultDownloadUrl: undefined,
-          statusMessage: `Queued canopy extraction for ${fileName}.`,
-          error: undefined,
-        },
-      };
-    });
-
-    const controller = new AbortController();
-    canopyJobControllersRef.current[fileName] = controller;
-
-    setStatusMessage(
-      `Queued canopy extraction for ${fileName}. AOI square side ${getAoiSideText(aoiSideKm)} (limit about 60 km).`,
-    );
-
-    try {
-      const job = await createCanopyExtractionJob(geometry, {
-        signal: controller.signal,
-      });
-
-      if (canopyJobGenerationRef.current[fileName] !== nextGeneration) {
-        return;
-      }
-
-      setCanopyLayers((prev) => {
-        const existing = prev[fileName];
-
-        if (!existing) {
-          return prev;
-        }
-
-        return {
-          ...prev,
-          [fileName]: {
-            ...existing,
-            jobId: job.jobId,
-            jobStatus: job.status,
-            progress: job.progress ?? null,
-            etaSeconds: job.etaSeconds ?? null,
-            resultDownloadUrl: job.result?.downloadUrl ?? existing.resultDownloadUrl,
-            statusMessage: job.message ?? `Queued canopy extraction for ${fileName}.`,
-            isLoading: job.status === "queued" || job.status === "running",
-            error: undefined,
-          },
-        };
-      });
-
-      if (job.status === "failed") {
-        const failureMessage = formatCanopyError(job.error ?? { message: job.message });
-        setStatusMessage(`Canopy extraction failed for ${fileName}: ${failureMessage}`);
-        return;
-      }
-
-      if (job.status !== "queued" && job.status !== "running") {
-        if (!job.result?.downloadUrl) {
-          throw new Error("Canopy extraction succeeded without a download URL.");
-        }
-
-        await applyCanopyJobResult(fileName, job.jobId, job.result.downloadUrl, nextGeneration);
-        return;
-      }
-
-      await pollCanopyExtractionJob(fileName, job.jobId, nextGeneration, controller);
-    } catch (error) {
-      if (canopyJobGenerationRef.current[fileName] !== nextGeneration) {
-        return;
-      }
-
-      if (error instanceof DOMException && error.name === "AbortError") {
-        return;
-      }
-
-      const message = error instanceof Error ? error.message : "Unknown extraction error.";
-
-      setCanopyLayers((prev) => {
-        const existing = prev[fileName];
-
-        if (!existing) {
-          return prev;
-        }
-
-        return {
-          ...prev,
-          [fileName]: {
-            ...existing,
-            isLoading: false,
-            jobStatus: "failed",
-            progress: null,
-            etaSeconds: null,
-            statusMessage: `Canopy extraction failed for ${fileName}: ${message}`,
-            error: {
-              code: "CHM_JOB_FAILED",
-              message,
-            },
-          },
-        };
-      });
-
-      setStatusMessage(`Canopy extraction failed for ${fileName}: ${message}`);
-    } finally {
-      if (canopyJobControllersRef.current[fileName] === controller) {
-        canopyJobControllersRef.current[fileName] = null;
-      }
-    }
-  }, [applyCanopyJobResult, bumpCanopyJobGeneration, disposeCanopyLayerArtifacts, pollCanopyExtractionJob]);
 
   const onVectorLayerAdd = useCallback((
     fileName: string,
     payload: {
-      layer: BaseLayer;
+      layer: VectorLayer<VectorSource>;
       defaultFillOpacity: number;
-      setFillOpacity: (opacity: number) => void;
+      availableGroupingColumns: string[];
     },
   ) => {
     setCommunityMapLayerNames((prev) => (prev.includes(fileName) ? prev : [...prev, fileName]));
@@ -807,21 +484,44 @@ export default function MapContainer() {
     setVectorLayers((prev) => {
       const existing = prev[fileName];
       const nextFillOpacity = existing?.fillOpacity ?? payload.defaultFillOpacity;
+      const nextGroupingColumn =
+        existing?.groupingColumn && payload.availableGroupingColumns.includes(existing.groupingColumn)
+          ? existing.groupingColumn
+          : null;
 
-      payload.layer.setVisible(existing?.isVisible ?? true);
-      payload.setFillOpacity(nextFillOpacity);
+      const vectorLayer = payload.layer;
+      const featureSource = vectorLayer.getSource();
+      const featureList = featureSource?.getFeatures() ?? [];
+      const groupingStats = collectGroupingStats(featureList, nextGroupingColumn);
+
+      vectorLayer.setVisible(existing?.isVisible ?? true);
+      applyVectorLayerStyle(
+        vectorLayer,
+        nextFillOpacity,
+        nextGroupingColumn,
+        groupingStats.valueColors,
+      );
 
       return {
         ...prev,
         [fileName]: {
-          layer: payload.layer,
+          layer: vectorLayer,
           isVisible: existing?.isVisible ?? true,
           fillOpacity: nextFillOpacity,
-          setFillOpacity: payload.setFillOpacity,
+          availableGroupingColumns: payload.availableGroupingColumns,
+          groupingColumn: nextGroupingColumn,
+          groupingValueColors: groupingStats.valueColors,
+          groupingValueCounts: groupingStats.valueCounts,
         },
       };
     });
-  }, []);
+
+    const source = payload.layer.getSource();
+    const extent = source?.getExtent();
+    if (extent) {
+      fitMapToCommunityPolygonExtent(extent);
+    }
+  }, [fitMapToCommunityPolygonExtent]);
 
   const onVectorLayerVisibilityChange = useCallback((fileName: string, isVisible: boolean) => {
     setVectorLayers((prev) => {
@@ -849,7 +549,12 @@ export default function MapContainer() {
         return prev;
       }
 
-      existing.setFillOpacity(fillOpacity);
+      applyVectorLayerStyle(
+        existing.layer,
+        fillOpacity,
+        existing.groupingColumn,
+        existing.groupingValueColors,
+      );
 
       return {
         ...prev,
@@ -861,86 +566,54 @@ export default function MapContainer() {
     });
   }, []);
 
-  const onCanopyLayerVisibilityChange = useCallback((fileName: string, isVisible: boolean) => {
-    setCanopyLayers((prev) => {
+  const onVectorLayerGroupingColumnChange = useCallback((fileName: string, groupingColumn: string | null) => {
+    setVectorLayers((prev) => {
       const existing = prev[fileName];
       if (!existing) {
         return prev;
       }
 
-      if (existing.layers) {
-        for (const layer of existing.layers) {
-          layer.setVisible(isVisible);
-        }
-      }
+      const normalizedGrouping =
+        groupingColumn && existing.availableGroupingColumns.includes(groupingColumn)
+          ? groupingColumn
+          : null;
+      const source = existing.layer.getSource();
+      const features = source?.getFeatures() ?? [];
+      const groupingStats = collectGroupingStats(features, normalizedGrouping);
+
+      applyVectorLayerStyle(
+        existing.layer,
+        existing.fillOpacity,
+        normalizedGrouping,
+        groupingStats.valueColors,
+      );
 
       return {
         ...prev,
         [fileName]: {
           ...existing,
-          isVisible,
+          groupingColumn: normalizedGrouping,
+          groupingValueColors: groupingStats.valueColors,
+          groupingValueCounts: groupingStats.valueCounts,
         },
       };
     });
   }, []);
 
-  const onCanopyLayerOpacityChange = useCallback((fileName: string, opacity: number) => {
-    setCanopyLayers((prev) => {
-      const existing = prev[fileName];
-      if (!existing) {
-        return prev;
-      }
-
-      if (existing.layers) {
-        for (const layer of existing.layers) {
-          layer.setOpacity(opacity);
-        }
-      }
-
-      return {
-        ...prev,
-        [fileName]: {
-          ...existing,
-          opacity,
-        },
-      };
-    });
-  }, []);
-
-  const onCanopyLayerStart = useCallback((fileName: string) => {
-    const canopyLayer = canopyLayers[fileName];
-
-    if (!canopyLayer?.requestGeometry || canopyLayer.isLoading) {
+  const onCommunityPolygonFocus = useCallback((fileName: string) => {
+    const layerState = vectorLayers[fileName];
+    if (!layerState) {
       return;
     }
 
-    void startCanopyExtractionForGeometry(fileName, canopyLayer.requestGeometry);
-  }, [canopyLayers, startCanopyExtractionForGeometry]);
-
-  const onCanopyLayerDownload = useCallback(async (fileName: string) => {
-    const canopyLayer = canopyLayers[fileName];
-    const downloadTarget = canopyLayer?.resultDownloadUrl ?? canopyLayer?.jobId;
-
-    if (!canopyLayer || canopyLayer.jobStatus !== "succeeded" || !downloadTarget) {
+    const source = layerState.layer.getSource();
+    const extent = source?.getExtent();
+    if (!extent) {
       return;
     }
 
-    try {
-      const result = await downloadChmResult(downloadTarget);
-      const objectUrl = URL.createObjectURL(result.blob);
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = result.filename;
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(objectUrl);
-      setStatusMessage(`Downloaded canopy result for ${fileName}.`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "CHM download failed.";
-      setStatusMessage(`Canopy download failed for ${fileName}: ${message}`);
-    }
-  }, [canopyLayers]);
+    fitMapToCommunityPolygonExtent(extent);
+  }, [fitMapToCommunityPolygonExtent, vectorLayers]);
 
   const clearDrawingState = useCallback(() => {
     drawingVerticesRef.current = [];
@@ -971,7 +644,7 @@ export default function MapContainer() {
       const polygon = new Polygon([[...vertices, vertices[0]!]]);
       const feature = new Feature({ geometry: polygon });
       const source = new VectorSource({ features: [feature] });
-      let fillOpacity = DEFAULT_VECTOR_FILL_OPACITY;
+      const fillOpacity = DEFAULT_VECTOR_FILL_OPACITY;
 
       const layer = new VectorLayer({
         source,
@@ -984,38 +657,12 @@ export default function MapContainer() {
         },
       });
 
-      const setFillOpacity = (opacity: number) => {
-        fillOpacity = opacity;
-        layer.setStyle(createVectorStyle(fillOpacity));
-      };
-
       mapContext.map.addLayer(layer);
       onVectorLayerAdd(fileName, {
         layer,
         defaultFillOpacity: fillOpacity,
-        setFillOpacity,
+        availableGroupingColumns: [],
       });
-
-      const geojsonFeature = geojsonFormatRef.current.writeFeatureObject(feature, {
-        dataProjection: "EPSG:4326",
-        featureProjection: "EPSG:3857",
-      }) as GeoJsonFeature<Geometry, GeoJsonProperties>;
-
-      const boundaryGeoJson = buildCommunityBoundaryGeoJson({
-        type: "FeatureCollection",
-        features: [geojsonFeature],
-      });
-
-      queueCanopyExtractionForGeometry(fileName, boundaryGeoJson.boundary);
-
-      const layerExtent = source.getExtent();
-      if (layerExtent) {
-        mapContext.map.getView().fit(layerExtent, {
-          duration: 500,
-          maxZoom: 12,
-          padding: [40, 40, 40, 40],
-        });
-      }
 
       clearDrawingState();
       setPendingPolygonConfirm(null);
@@ -1026,21 +673,17 @@ export default function MapContainer() {
         `Required centroid buffer ${formatKilometers(metrics.requiredBufferKilometers)} km ` +
         `of ${formatKilometers(metrics.maxAllowedBufferKilometers)} km max.`;
 
-      if (boundaryGeoJson.wasClipped) {
+      if (metrics.exceedsBufferLimit) {
         setStatusMessage(
-          `${fileName} added. ${measurementSummary} AOI side ${getAoiSideText(boundaryGeoJson.requestedSideKilometers)} exceeded ${getAoiSideText(boundaryGeoJson.maxAllowedSideKilometers)} and was clipped to ${getAoiSideText(boundaryGeoJson.finalSideKilometers)}. Use Layer Controls to generate the Canopy Height layer.`,
-        );
-      } else if (metrics.exceedsBufferLimit) {
-        setStatusMessage(
-          `${fileName} added. ${measurementSummary} Your polygon was automatically reduced to the maximum ${formatKilometers(metrics.maxAllowedBufferKilometers)} km square buffer centered on your drawing. Use Layer Controls to generate the Canopy Height layer.`,
+          `${fileName} added. ${measurementSummary} Your polygon was automatically reduced to the maximum ${formatKilometers(metrics.maxAllowedBufferKilometers)} km square buffer centered on your drawing.`,
         );
       } else {
         setStatusMessage(
-          `${fileName} added. ${measurementSummary} Use Layer Controls to generate the Canopy Height layer.`,
+          `${fileName} added. ${measurementSummary}`,
         );
       }
     },
-    [clearDrawingState, mapContext.map, onVectorLayerAdd, queueCanopyExtractionForGeometry],
+    [clearDrawingState, mapContext.map, onVectorLayerAdd],
   );
 
   const finalizePolygonDrawing = useCallback(
@@ -1062,7 +705,7 @@ export default function MapContainer() {
       if (metrics.exceedsBufferLimit) {
         const overflowKilometers = metrics.requiredBufferKilometers - metrics.maxAllowedBufferKilometers;
         setStatusMessage(
-          `${baseMessage} This is too large by ${formatKilometers(overflowKilometers)} km and will be clipped for CHM extraction.`,
+          `${baseMessage} This is too large by ${formatKilometers(overflowKilometers)} km and will be clipped if you confirm.`,
         );
       } else {
         setStatusMessage(baseMessage);
@@ -1073,10 +716,6 @@ export default function MapContainer() {
 
   const deleteCommunityPolygon = useCallback(
     (fileName: string) => {
-      bumpCanopyJobGeneration(fileName);
-      const existingCanopyLayer = canopyLayersRef.current[fileName];
-      disposeCanopyLayerArtifacts(fileName, existingCanopyLayer);
-
       setCommunityMapLayerNames((prev) => prev.filter((name) => name !== fileName));
 
       setVectorLayers((prev) => {
@@ -1090,15 +729,17 @@ export default function MapContainer() {
         return next;
       });
 
-      setCanopyLayers((prev) => {
-        const next = { ...prev };
-        delete next[fileName];
-        return next;
+      setHoveredVectorInfo((prev) => {
+        if (!prev || prev.layerName !== fileName) {
+          return prev;
+        }
+
+        return null;
       });
 
       setStatusMessage(`${fileName} removed.`);
     },
-    [bumpCanopyJobGeneration, disposeCanopyLayerArtifacts, mapContext.map],
+    [mapContext.map],
   );
 
   const communityPolygonItems = useMemo<CommunityPolygonItem[]>(() => {
@@ -1113,28 +754,21 @@ export default function MapContainer() {
           fileName,
           isVisible: vectorLayer.isVisible,
           opacity: vectorLayer.fillOpacity,
-          isCanopyLoading: false,
+          groupingColumn: vectorLayer.groupingColumn,
+          availableGroupingColumns: vectorLayer.availableGroupingColumns,
+          groupCount: Object.keys(vectorLayer.groupingValueCounts).length,
+          groupingPreview: Object.entries(vectorLayer.groupingValueCounts)
+            .map(([value, count]) => ({
+              value,
+              count,
+              color: vectorLayer.groupingValueColors[value] ?? DEFAULT_VECTOR_STROKE_COLOR,
+            }))
+            .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+            .slice(0, 6),
         };
       })
       .filter((item): item is CommunityPolygonItem => item !== null);
   }, [communityMapLayerNames, vectorLayers]);
-
-  const canopyLayerItems = useMemo<CanopyLayerItem[]>(() => {
-    return Object.entries(canopyLayers).map(([fileName, data]) => ({
-      fileName,
-      sourceName: fileName,
-      isVisible: data.isVisible,
-      opacity: data.opacity,
-      isLoading: data.isLoading,
-      jobStatus: data.jobStatus,
-      progress: data.progress,
-      etaSeconds: data.etaSeconds,
-      statusMessage: data.statusMessage,
-      canDownload: Boolean(data.requestGeometry),
-      hasData: data.tileUrls.length > 0 || Boolean(data.layers?.length),
-      error: data.error,
-    }));
-  }, [canopyLayers]);
 
   const activeLegendLayers = useMemo<ActiveLegendLayer[]>(() => {
     const layers: ActiveLegendLayer[] = [];
@@ -1157,24 +791,17 @@ export default function MapContainer() {
         kind: "vector",
         title: fileName,
         fillOpacity: data.fillOpacity,
-      });
-    }
-
-    for (const [fileName, data] of Object.entries(canopyLayers)) {
-      if (!data.isVisible || (data.tileUrls.length === 0 && !data.layers?.length)) {
-        continue;
-      }
-
-      layers.push({
-        id: `canopy:${fileName}`,
-        kind: "canopy",
-        title: fileName,
-        isLoading: data.isLoading,
+        groupingColumn: data.groupingColumn,
+        groups: Object.entries(data.groupingValueCounts).map(([value, count]) => ({
+          value,
+          count,
+          color: data.groupingValueColors[value] ?? DEFAULT_VECTOR_STROKE_COLOR,
+        })),
       });
     }
 
     return layers;
-  }, [canopyLayers, isLandcoverVisible, vectorLayers]);
+  }, [isLandcoverVisible, vectorLayers]);
 
   const floatingMessage = useMemo(() => {
     if (missingPmtilesUrl) {
@@ -1218,17 +845,6 @@ export default function MapContainer() {
       isCancelled = true;
     };
   }, [pmtilesBaseUrl, pmtilesZoomRangeKey, year]);
-
-  useEffect(() => {
-    return () => {
-      for (const controller of Object.values(canopyJobControllersRef.current)) {
-        controller?.abort();
-      }
-
-      canopyJobControllersRef.current = {};
-      canopyJobGenerationRef.current = {};
-    };
-  }, []);
 
   useEffect(() => {
     if (!isPlaying || missingPmtilesUrl || hasPrefetchedAllYearsRef.current) {
@@ -1286,125 +902,8 @@ export default function MapContainer() {
     year,
   ]);
 
-  // Handle creating and adding GeoTIFF layers to the map
   useEffect(() => {
     if (!mapContext.map) {
-      return;
-    }
-
-    const createAndAddLayers = async () => {
-      for (const [fileName, layerData] of Object.entries(canopyLayers)) {
-        // If layers already exist, just update visibility
-        if (layerData.layers && layerData.layers.length > 0) {
-          for (const layer of layerData.layers) {
-            layer.setVisible(layerData.isVisible);
-          }
-          continue;
-        }
-
-        // If still loading or no URLs, skip
-        if (layerData.isLoading || layerData.tileUrls.length === 0) {
-          continue;
-        }
-
-        // Create a layer for each tile URL
-        const createdLayers: BaseLayer[] = [];
-        let shouldUpdateView = true; // Update view only for the first layer
-        
-        for (const tileUrl of layerData.tileUrls) {
-          console.log(`Creating GeoTIFF layer from tile URL: ${tileUrl}`);
-          const result = await createGeoTIFFLayer(tileUrl, fileName);
-          if (result && mapContext.map) {
-            const { layer, source } = result;
-            console.log(`Adding layer to map: ${layer.get("name")}`);
-            mapContext.map.addLayer(layer);
-            layer.setVisible(layerData.isVisible);
-            layer.setOpacity(layerData.opacity);
-            console.log(`Layer added and visibility set to: ${layerData.isVisible}`);
-            createdLayers.push(layer);
-
-            // Update map view using GeoTIFF metadata (only for first layer)
-            if (shouldUpdateView) {
-              shouldUpdateView = false;
-              try {
-                // Use GeoTIFF extent to fit the existing map view. Replacing the
-                // entire view with GeoTIFF resolutions can lock zoom-out behavior.
-                const viewConfig = await source.getView();
-                console.log("GeoTIFF view config:", viewConfig);
-
-                if (viewConfig.extent) {
-                  const existingView = mapContext.map.getView();
-                  const mapSize = mapContext.map.getSize();
-
-                  existingView.fit(viewConfig.extent, {
-                    duration: 500,
-                    padding: [24, 24, 24, 24],
-                    size: mapSize,
-                    maxZoom: 18,
-                  });
-
-                  const sourceMaxResolution =
-                    Array.isArray(viewConfig.resolutions) &&
-                    typeof viewConfig.resolutions[0] === "number"
-                      ? viewConfig.resolutions[0]
-                      : null;
-
-                  // If fit lands too coarse, clamp to the GeoTIFF's first
-                  // renderable resolution so the raster is visible immediately.
-                  if (sourceMaxResolution !== null) {
-                    const currentResolution = existingView.getResolution();
-                    if (
-                      typeof currentResolution === "number" &&
-                      currentResolution > sourceMaxResolution
-                    ) {
-                      existingView.setResolution(sourceMaxResolution);
-                    }
-                  }
-                }
-              } catch (err) {
-                console.warn("Failed to set view from GeoTIFF metadata:", err);
-              }
-            }
-          } else {
-            console.warn(`Failed to create layer from ${tileUrl}`);
-          }
-        }
-
-        // Update state with layer references
-        if (createdLayers.length > 0) {
-          setCanopyLayers((prev) => ({
-            ...prev,
-            [fileName]: { ...prev[fileName]!, layers: createdLayers },
-          }));
-        }
-      }
-    };
-
-    createAndAddLayers().catch((error) => {
-      console.error("Error creating GeoTIFF layers:", error);
-    });
-
-    // Cleanup: remove detached canopy layers from the map.
-    if (mapContext.map) {
-      const currentCanopyLayerSet = new Set(
-        Object.values(canopyLayers).flatMap((layerData) => layerData.layers ?? []),
-      );
-
-      const existingCanopyLayers = mapContext.map
-        .getLayers()
-        .getArray()
-        .filter((layer) => layer.get("isCanopyLayer"));
-
-      for (const layer of existingCanopyLayers) {
-          if (!currentCanopyLayerSet.has(layer)) {
-          mapContext.map.removeLayer(layer);
-        }
-      }
-    }
-  }, [canopyLayers, mapContext.map]);
-
-  useEffect(() => {
-    if (!mapContext.map || !pmtilesLayer) {
       return;
     }
 
@@ -1426,7 +925,48 @@ export default function MapContainer() {
     const handlePointerMove = (
       event: MapBrowserEvent<PointerEvent | KeyboardEvent | WheelEvent>,
     ) => {
-      if (event.dragging || !isLandcoverVisible) {
+      const [pixelX, pixelY] = event.pixel;
+
+      const hoveredVectorResult = mapContext.map?.forEachFeatureAtPixel(
+        event.pixel,
+        (featureCandidate, layerCandidate) => {
+          const vectorLayer = layerCandidate as VectorLayer<VectorSource> | null;
+          if (!vectorLayer || !vectorLayer.get("isVectorUploadLayer")) {
+            return null;
+          }
+
+          const layerName = vectorLayer.get("name");
+          if (typeof layerName !== "string") {
+            return null;
+          }
+
+          return {
+            feature: featureCandidate,
+            layerName,
+          };
+        },
+        { hitTolerance: 4 },
+      );
+
+      if (hoveredVectorResult?.feature) {
+        const layerState = vectorLayers[hoveredVectorResult.layerName];
+        const groupingColumn = layerState?.groupingColumn ?? null;
+        const groupingValue = groupingColumn
+          ? normalizeGroupValue(hoveredVectorResult.feature.get(groupingColumn))
+          : "Single color";
+
+        setHoveredVectorInfo({
+          layerName: hoveredVectorResult.layerName,
+          groupingColumn,
+          groupingValue,
+          pixelX,
+          pixelY,
+        });
+      } else {
+        setHoveredVectorInfo(null);
+      }
+
+      if (event.dragging || !isLandcoverVisible || !pmtilesLayer) {
         if (hoverUpdateFrameId !== null) {
           window.cancelAnimationFrame(hoverUpdateFrameId);
           hoverUpdateFrameId = null;
@@ -1438,7 +978,6 @@ export default function MapContainer() {
         return;
       }
 
-      const [pixelX, pixelY] = event.pixel;
       latestPixel = [pixelX, pixelY];
 
       setHoverPixelInfo((previous) => {
@@ -1484,7 +1023,7 @@ export default function MapContainer() {
         const code =
           alpha === 0
             ? null
-            : resolveClassCodeFromRenderedRgb(red, green, blue);
+            : resolveMapbiomasClassCodeFromRgb(red, green, blue, alpha);
 
         const viewZoom = mapContext.map?.getView().getZoom();
         const requestedZoom = Number.isFinite(viewZoom) ? Math.round(viewZoom ?? 0) : null;
@@ -1536,7 +1075,83 @@ export default function MapContainer() {
 
       mapContext.map?.un("pointermove", handlePointerMove);
     };
-  }, [isLandcoverVisible, mapContext.map, pmtilesLayer, pmtilesZoomRange]);
+  }, [isLandcoverVisible, mapContext.map, pmtilesLayer, pmtilesZoomRange, vectorLayers]);
+
+  useEffect(() => {
+    if (!mapContext.map || isDrawingPolygon || pendingPolygonConfirm) {
+      return;
+    }
+
+    const handleMapSingleClick = (
+      event: MapBrowserEvent<PointerEvent | KeyboardEvent | WheelEvent>,
+    ) => {
+      const selectedVectorResult = mapContext.map?.forEachFeatureAtPixel(
+        event.pixel,
+        (featureCandidate, layerCandidate) => {
+          const vectorLayer = layerCandidate as VectorLayer<VectorSource> | null;
+          if (!vectorLayer || !vectorLayer.get("isVectorUploadLayer")) {
+            return null;
+          }
+
+          const layerName = vectorLayer.get("name");
+          if (typeof layerName !== "string") {
+            return null;
+          }
+
+          return {
+            feature: featureCandidate,
+            layerName,
+          };
+        },
+        { hitTolerance: 4 },
+      );
+
+      if (!selectedVectorResult?.feature) {
+        setSelectedVectorInfo(null);
+        return;
+      }
+
+      const geometry =
+        selectedVectorResult.feature instanceof Feature
+          ? selectedVectorResult.feature.getGeometry()?.clone() ?? null
+          : null;
+      const layerState = vectorLayers[selectedVectorResult.layerName];
+      const allProps = selectedVectorResult.feature.getProperties() as Record<string, unknown>;
+      const areaMetrics =
+        selectedVectorResult.feature instanceof Feature
+          ? getHoveredFeatureAreaMetrics(selectedVectorResult.feature.getGeometry())
+          : { areaSquareKilometers: null, areaHectares: null };
+      const groupingColumn = layerState?.groupingColumn ?? null;
+      const groupingValue = groupingColumn
+        ? normalizeGroupValue(selectedVectorResult.feature.get(groupingColumn))
+        : "Single color";
+
+      const allProperties = Object.entries(allProps)
+        .filter(([key, value]) => key !== "geometry" && value !== undefined && value !== null)
+        .map(([key, value]) => ({ key, value: String(value) }));
+      const selectionKey = `${selectedVectorResult.layerName}:${allProperties
+        .slice(0, 6)
+        .map((entry) => `${entry.key}=${entry.value}`)
+        .join("|")}`;
+
+      setSelectedVectorInfo({
+        layerName: selectedVectorResult.layerName,
+        groupingColumn,
+        groupingValue,
+        geometry,
+        properties: allProperties,
+        areaSquareKilometers: areaMetrics.areaSquareKilometers,
+        areaHectares: areaMetrics.areaHectares,
+        selectionKey,
+      });
+    };
+
+    mapContext.map.on("singleclick", handleMapSingleClick);
+
+    return () => {
+      mapContext.map?.un("singleclick", handleMapSingleClick);
+    };
+  }, [isDrawingPolygon, mapContext.map, pendingPolygonConfirm, vectorLayers]);
 
   useEffect(() => {
     drawingVerticesRef.current = drawingVertices;
@@ -1663,6 +1278,142 @@ export default function MapContainer() {
     hoverPixelInfo?.code !== null && hoverPixelInfo?.code !== undefined
       ? MAPBIOMAS_CLASS_LOOKUP[hoverPixelInfo.code]
       : null;
+  const selectedPolygonInfo =
+    selectedVectorInfo && vectorLayers[selectedVectorInfo.layerName]
+      ? selectedVectorInfo
+      : null;
+  const selectedPolygonPanelInfo =
+    selectedPolygonInfo
+      ? {
+          layerName: selectedPolygonInfo.layerName,
+          groupingColumn: selectedPolygonInfo.groupingColumn,
+          groupingValue: selectedPolygonInfo.groupingValue,
+          properties: selectedPolygonInfo.properties,
+          areaSquareKilometers: selectedPolygonInfo.areaSquareKilometers,
+          areaHectares: selectedPolygonInfo.areaHectares,
+        }
+      : null;
+
+  const onDownloadSelectedPolygonGeoJson = useCallback(() => {
+    if (!selectedPolygonInfo?.geometry) {
+      setStatusMessage("No polygon geometry selected for download.");
+      return;
+    }
+
+    try {
+      const geometry = geojsonFormatRef.current.writeGeometryObject(selectedPolygonInfo.geometry, {
+        dataProjection: "EPSG:4326",
+        featureProjection: "EPSG:3857",
+      }) as Geometry;
+
+      const properties = Object.fromEntries(
+        selectedPolygonInfo.properties.map((entry) => [entry.key, entry.value]),
+      );
+
+      const feature: GeoJsonFeature<Geometry, GeoJsonProperties> = {
+        type: "Feature",
+        geometry,
+        properties: {
+          ...properties,
+          layerName: selectedPolygonInfo.layerName,
+          groupingColumn: selectedPolygonInfo.groupingColumn,
+          groupingValue: selectedPolygonInfo.groupingValue,
+        },
+      };
+
+      const payload: FeatureCollection<Geometry, GeoJsonProperties> = {
+        type: "FeatureCollection",
+        features: [feature],
+      };
+
+      const fileSafeLayerName = selectedPolygonInfo.layerName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "selected-polygon";
+      const filename = `${fileSafeLayerName}.geojson`;
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/geo+json",
+      });
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+
+      setStatusMessage(`Downloaded ${filename}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to generate GeoJSON download.";
+      setStatusMessage(`Polygon download failed: ${message}`);
+    }
+  }, [selectedPolygonInfo]);
+
+  const onRunLandcoverStats = useCallback(async () => {
+    if (!selectedPolygonInfo?.geometry) {
+      setStatusMessage("No polygon geometry selected for landcover stats.");
+      return;
+    }
+
+    if (!Number.isInteger(landcoverStatsBaselineYear) || !Number.isInteger(year)) {
+      setStatusMessage("Baseline year and comparison year must be set before running landcover stats.");
+      return;
+    }
+
+    if (landcoverStatsBaselineYear === year) {
+      setStatusMessage("Baseline year must differ from the comparison year.");
+      return;
+    }
+
+    try {
+      const geometry = geojsonFormatRef.current.writeGeometryObject(selectedPolygonInfo.geometry, {
+        dataProjection: "EPSG:4326",
+        featureProjection: "EPSG:3857",
+      }) as Geometry;
+
+      const properties = Object.fromEntries(
+        selectedPolygonInfo.properties.map((entry) => [entry.key, entry.value]),
+      );
+
+      const feature: GeoJsonFeature<Geometry, GeoJsonProperties> = {
+        type: "Feature",
+        geometry,
+        properties: {
+          ...properties,
+          layerName: selectedPolygonInfo.layerName,
+          groupingColumn: selectedPolygonInfo.groupingColumn,
+          groupingValue: selectedPolygonInfo.groupingValue,
+        },
+      };
+
+      const payload: FeatureCollection<Geometry, GeoJsonProperties> = {
+        type: "FeatureCollection",
+        features: [feature],
+      };
+
+      setStatusMessage(`Queued landcover stats for ${selectedPolygonInfo.layerName}.`);
+
+      await landcoverStatsJob.startJob({
+        geojson: payload,
+        baselineYear: landcoverStatsBaselineYear,
+        comparisonYear: year,
+      });
+
+      setStatusMessage(`Landcover stats ready for ${selectedPolygonInfo.layerName}.`);
+    } catch (error) {
+      const message = formatLandcoverStatsError(error);
+      setStatusMessage(`Landcover stats failed for ${selectedPolygonInfo.layerName}: ${message}`);
+    }
+  }, [landcoverStatsBaselineYear, landcoverStatsJob, selectedPolygonInfo, year]);
+
+  const onCancelLandcoverStats = useCallback(() => {
+    landcoverStatsJob.cancel();
+    setStatusMessage("Landcover stats request cancelled.");
+  }, [landcoverStatsJob]);
+
   const hoverTooltipStyle =
     hoverPixelInfo && mapContext.map
       ? (() => {
@@ -1680,6 +1431,27 @@ export default function MapContainer() {
                 Math.max(12, mapSize[1] - tooltipHeight - 12),
               )
             : hoverPixelInfo.pixelY - offsetY;
+
+          return { left, top };
+        })()
+      : null;
+  const hoverVectorTooltipStyle =
+    hoveredVectorInfo && mapContext.map
+      ? (() => {
+          const mapSize = mapContext.map.getSize();
+          const tooltipWidth = 288;
+          const tooltipHeight = 68;
+          const offsetX = 16;
+          const offsetY = 30;
+          const left = mapSize
+            ? Math.min(hoveredVectorInfo.pixelX + offsetX, Math.max(12, mapSize[0] - tooltipWidth - 12))
+            : hoveredVectorInfo.pixelX + offsetX;
+          const top = mapSize
+            ? Math.min(
+                Math.max(12, hoveredVectorInfo.pixelY - offsetY),
+                Math.max(12, mapSize[1] - tooltipHeight - 12),
+              )
+            : hoveredVectorInfo.pixelY - offsetY;
 
           return { left, top };
         })()
@@ -1711,54 +1483,93 @@ export default function MapContainer() {
         map={mapContext.map}
         onMessage={setStatusMessage}
         onVectorLayerAdd={onVectorLayerAdd}
-        onCanopyExtractionQueued={queueCanopyExtractionForGeometry}
       />
 
       <div className="pointer-events-none absolute inset-0 z-50">
-        <MapTopPanels
-          isSatelliteVisible={isSatelliteVisible}
-          isBoundariesAndPlacesVisible={isBoundariesAndPlacesVisible}
-          isLandcoverVisible={isLandcoverVisible}
-          landcoverOpacity={landcoverOpacity}
-          canopyLayers={canopyLayerItems}
-          activeLegendLayers={activeLegendLayers}
-          isLegendOpen={isLegendOpen}
-          onSatelliteChange={setIsSatelliteVisible}
-          onBoundariesAndPlacesChange={setIsBoundariesAndPlacesVisible}
-          onLandcoverChange={setIsLandcoverVisible}
-          onLandcoverOpacityChange={setLandcoverOpacity}
-          onCanopyLayerStart={onCanopyLayerStart}
-          onCanopyLayerDownload={onCanopyLayerDownload}
-          onCanopyLayerVisibilityChange={onCanopyLayerVisibilityChange}
-          onCanopyLayerOpacityChange={onCanopyLayerOpacityChange}
-          onLegendOpenChange={setIsLegendOpen}
-          primaryAction={
-            <CommunityMapPanel
-              items={communityPolygonItems}
-              isDrawingPolygon={isDrawingPolygon}
-              drawnVertexCount={drawingVertices.length}
-              onUploadClick={() => vectorDropzoneRef.current?.openFilePicker()}
-              onStartDrawing={() => {
-                setIsDrawingPolygon(true);
-                setPendingPolygonConfirm(null);
-                clearDrawingState();
-                setStatusMessage(
-                  "Drawing started. Click vertices, then click the first vertex to close the polygon.",
-                );
-              }}
-              onCancelDrawing={cancelDrawing}
-              onPolygonVisibilityChange={onVectorLayerVisibilityChange}
-              onPolygonOpacityChange={onVectorLayerOpacityChange}
-              onPolygonDelete={deleteCommunityPolygon}
-            />
+        <OverlayHoverBoundary onHoverChange={setIsHoveringOverlayPanel}>
+          <MapTopPanels
+            isSatelliteVisible={isSatelliteVisible}
+            isBoundariesAndPlacesVisible={isBoundariesAndPlacesVisible}
+            isLandcoverVisible={isLandcoverVisible}
+            landcoverOpacity={landcoverOpacity}
+            activeLegendLayers={activeLegendLayers}
+            isLegendOpen={isLegendOpen}
+            onSatelliteChange={setIsSatelliteVisible}
+            onBoundariesAndPlacesChange={setIsBoundariesAndPlacesVisible}
+            onLandcoverChange={setIsLandcoverVisible}
+            onLandcoverOpacityChange={setLandcoverOpacity}
+            onLegendOpenChange={setIsLegendOpen}
+            selectedPolygonInfo={selectedPolygonPanelInfo}
+            canDownloadSelectedPolygon={Boolean(selectedPolygonInfo?.geometry)}
+            onDownloadSelectedPolygonGeoJson={onDownloadSelectedPolygonGeoJson}
+            landcoverStatsBaselineYear={landcoverStatsBaselineYear}
+            comparisonYear={year}
+            onLandcoverStatsBaselineYearChange={setLandcoverStatsBaselineYear}
+            onRunLandcoverStats={onRunLandcoverStats}
+            onCancelLandcoverStats={onCancelLandcoverStats}
+            landcoverStatsJob={{
+              status: landcoverStatsJob.status,
+              jobId: landcoverStatsJob.jobId,
+              progress: landcoverStatsJob.progress,
+              etaSeconds: landcoverStatsJob.etaSeconds,
+              message: landcoverStatsJob.message,
+              error: landcoverStatsJob.error,
+              result: landcoverStatsJob.result ?? null,
+            }}
+            primaryAction={
+              <CommunityMapPanel
+                embedded
+                items={communityPolygonItems}
+                isDrawingPolygon={isDrawingPolygon}
+                drawnVertexCount={drawingVertices.length}
+                onUploadClick={() => vectorDropzoneRef.current?.openFilePicker()}
+                onStartDrawing={() => {
+                  setIsDrawingPolygon(true);
+                  setPendingPolygonConfirm(null);
+                  clearDrawingState();
+                  setStatusMessage(
+                    "Drawing started. Click vertices, then click the first vertex to close the polygon.",
+                  );
+                }}
+                onCancelDrawing={cancelDrawing}
+                onPolygonFocus={onCommunityPolygonFocus}
+                onPolygonVisibilityChange={onVectorLayerVisibilityChange}
+                onPolygonOpacityChange={onVectorLayerOpacityChange}
+                onPolygonGroupingColumnChange={onVectorLayerGroupingColumnChange}
+                onPolygonDelete={deleteCommunityPolygon}
+              />
+            }
+          />
+        </OverlayHoverBoundary>
+
+        <HoverVectorTooltip
+          hoveredVector={hoveredVectorInfo}
+          hoveredClass={
+            isLandcoverVisible && hoverPixelInfo?.alpha && hoverPixelInfo.alpha > 0
+              ? hoveredClass
+              : null
           }
+          hoveredClassCode={
+            isLandcoverVisible && hoverPixelInfo?.alpha && hoverPixelInfo.alpha > 0
+              ? hoverPixelInfo.code
+              : null
+          }
+          hoverTooltipStyle={hoverVectorTooltipStyle}
+          isVisible={Boolean(
+            hoveredVectorInfo && hoverVectorTooltipStyle && !isHoveringOverlayPanel,
+          )}
         />
 
         <HoverClassTooltip
           hoveredClass={hoveredClass}
           hoverTooltipStyle={hoverTooltipStyle}
           isVisible={Boolean(
-            hoverPixelInfo && hoverTooltipStyle && isLandcoverVisible && hoverPixelInfo.alpha > 0,
+            hoverPixelInfo &&
+              hoverTooltipStyle &&
+              isLandcoverVisible &&
+              hoverPixelInfo.alpha > 0 &&
+              !hoveredVectorInfo &&
+              !isHoveringOverlayPanel,
           )}
         />
 
@@ -1767,7 +1578,7 @@ export default function MapContainer() {
             <div className="w-full max-w-md rounded-xl border border-cyan-200/80 bg-white p-4 shadow-2xl">
               <h3 className="text-base font-semibold text-cyan-950">Use this polygon?</h3>
               <p className="mt-2 text-sm text-slate-700">
-                The CHM request will use a simplified square boundary.
+                This flow uses a simplified square boundary.
               </p>
               <div className="mt-3 rounded-lg border border-cyan-200/90 bg-cyan-50/80 px-3 py-2">
                 <p className="text-xs text-slate-700">
@@ -1817,25 +1628,20 @@ export default function MapContainer() {
         ) : null}
 
         {isLandcoverVisible ? (
-          <MapBottomSlider
-            year={year}
-            minYear={MIN_YEAR}
-            maxYear={MAX_YEAR}
-            isPlaying={isPlaying}
-            canAdvance={!isFrameLoading}
-            isFrameLoading={isFrameLoading}
-            isPreloadingYears={isPreloadingYears}
-            onYearChange={setYear}
-            onPlayingChange={setIsPlaying}
-          />
+          <OverlayHoverBoundary onHoverChange={setIsHoveringOverlayPanel}>
+            <MapBottomSlider
+              year={year}
+              minYear={MIN_YEAR}
+              maxYear={MAX_YEAR}
+              isPlaying={isPlaying}
+              canAdvance={!isFrameLoading}
+              isFrameLoading={isFrameLoading}
+              isPreloadingYears={isPreloadingYears}
+              onYearChange={setYear}
+              onPlayingChange={setIsPlaying}
+            />
+          </OverlayHoverBoundary>
         ) : null}
-
-        <PixelInspectorPanel
-          hoverPixelInfo={hoverPixelInfo}
-          hoveredClass={hoveredClass}
-          pmtilesZoomRange={pmtilesZoomRange}
-          isVisible={Boolean(hoverPixelInfo && mapContext.map && pmtilesLayer && isLandcoverVisible)}
-        />
 
         <FloatingStatusMessage message={floatingMessage} />
       </div>

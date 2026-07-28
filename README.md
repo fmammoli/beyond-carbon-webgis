@@ -65,6 +65,38 @@ npm run build
 - The client sends `geojson` to `/api/canopy/extract`; the route proxies it upstream with `X-API-Key`.
 - The browser downloads streamed GeoTIFF responses as `.tif` files.
 
+## Landcover Stats API
+
+- The app now exposes a local proxy at `/api/v1/landcover/stats/jobs` and `/api/v1/landcover/stats/jobs/:jobId`.
+- Choose proxy target in `.env.local` with `LANDCOVER_STATS_TARGET=local` or `LANDCOVER_STATS_TARGET=remote`.
+- Set `LANDCOVER_STATS_LOCAL_API_URL` and `LANDCOVER_STATS_REMOTE_API_URL` so switching target only requires changing `LANDCOVER_STATS_TARGET`.
+- You can still set `LANDCOVER_STATS_API_URL` (or `LANDCOVER_STATS_API_BASE_URL`) for a single explicit upstream override; explicit URL takes precedence over target switching.
+- Set `LANDCOVER_STATS_API_KEY` on the Next.js server to send `X-API-Key` upstream without exposing it in the browser.
+- If `LANDCOVER_STATS_API_KEY` is unset, the proxy falls back to `CHM_API_KEY` and then `CANOPY_API_KEY`.
+- Optional: set `LANDCOVER_STATS_API_HOST_HEADER` if upstream host validation requires a specific host header.
+- Optional: set `LANDCOVER_STATS_API_TIMEOUT_MS` (default `300000`) to control proxy timeout.
+- You can still set `NEXT_PUBLIC_LANDCOVER_STATS_API_BASE_URL` when pointing the browser directly to another API origin.
+- You can still set `NEXT_PUBLIC_LANDCOVER_STATS_API_KEY` for browser-direct requests, but server-side `LANDCOVER_STATS_API_KEY` is preferred.
+- The client sends polygon GeoJSON to the stats jobs endpoint and renders JSON metrics only; it does not download binary files.
+
+### Smoke Test Script
+
+- Use `scripts/test_landcover_stats_api.py` to create a sample stats job and poll until completion.
+- The script reads `LANDCOVER_STATS_API_KEY`, then `CHM_API_KEY`, then `API_KEY`.
+- The script reads `LANDCOVER_API_BASE_URL`, then `LANDCOVER_STATS_LOCAL_API_URL`, with fallback `http://127.0.0.1:8000`.
+
+Run with defaults from environment:
+
+```bash
+npm run test:landcover:api
+```
+
+Run with explicit options:
+
+```bash
+python3 scripts/test_landcover_stats_api.py --base-url http://127.0.0.1:8000 --api-key your-api-key
+```
+
 ## PMTiles / R2 Requirements
 
 - Ensure CORS allows your app origin.

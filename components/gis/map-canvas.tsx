@@ -12,6 +12,7 @@ import {
   INDONESIA_CENTER_LON_LAT,
   INDONESIA_DEFAULT_ZOOM,
 } from "@/lib/gis-constants";
+import { ensureCanvasWillReadFrequentlyFor2D } from "@/lib/canvas-context";
 
 type MapCanvasReadyPayload = {
   map: Map;
@@ -50,6 +51,8 @@ export function MapCanvas({
       return;
     }
 
+    ensureCanvasWillReadFrequentlyFor2D();
+
     const satelliteLayer = new TileLayer({
       source: new XYZ({
         attributions: "Esri World Imagery",
@@ -84,7 +87,7 @@ export function MapCanvas({
     });
 
     satelliteLayerRef.current = satelliteLayer;
-  basicBasemapLayerRef.current = basicBasemapLayer;
+    basicBasemapLayerRef.current = basicBasemapLayer;
     boundariesAndPlacesLayerRef.current = boundariesAndPlacesLayer;
 
     const map = new Map({

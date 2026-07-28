@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import { ChevronDown, ListTree } from "lucide-react";
 
 import { MAPBIOMAS_CLASSES } from "@/lib/mapbiomas-colors";
-import { CANOPY_COLOR_STOPS } from "@/lib/geotiff-layer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -24,12 +23,8 @@ type ActiveLegendLayer =
       kind: "vector";
       title: string;
       fillOpacity: number;
-    }
-  | {
-      id: string;
-      kind: "canopy";
-      title: string;
-      isLoading: boolean;
+      groupingColumn?: string | null;
+      groups?: Array<{ value: string; color: string; count: number }>;
     };
 
 type LegendProps = {
@@ -81,11 +76,6 @@ function getIndonesianLabel(englishLabel: string): string {
   return CLASS_LABEL_TRANSLATIONS_ID[englishLabel] ?? englishLabel;
 }
 
-function colorStopToCssColor(color: [number, number, number, number]): string {
-  const [red, green, blue, alpha] = color;
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
-}
-
 function LandcoverLegendPanel() {
   const groupedClasses = useMemo(() => {
     const grouped = new Map<
@@ -131,14 +121,14 @@ function LandcoverLegendPanel() {
   }, []);
 
   return (
-    <div className="rounded-md border border-border/60 p-2">
-      <div className="mb-2 text-xs font-semibold">Landcover Legend</div>
+    <div className="rounded-md border border-slate-200/80 bg-white p-2.5">
+      <div className="mb-2 text-xs font-semibold text-slate-900">Landcover Legend</div>
       <div className="space-y-1.5">
         {groupedClasses.map((group) => (
-          <div key={group.key} className="rounded-md border border-border/60 p-1.5">
-            <div className="mb-1 flex items-center justify-between text-[10px] text-muted-foreground">
+          <div key={group.key} className="rounded-md border border-slate-200/80 bg-white p-1.5">
+            <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-slate-600">
               <span className="leading-tight">
-                <span className="block font-semibold text-foreground">
+                <span className="block font-semibold text-slate-900">
                   {group.key}.x {group.title.en}
                 </span>
                 <span className="block text-[9px]">{group.title.id}</span>
@@ -147,15 +137,15 @@ function LandcoverLegendPanel() {
             </div>
             <div className="space-y-1.5">
               {group.items.map((item) => (
-                <div key={item.id} className="flex items-start gap-1.5 text-[11px] leading-tight">
+                <div key={item.id} className="flex items-start gap-1.5 text-[11px] leading-tight text-slate-800">
                   <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-xs ring-1 ring-black/20"
+                    className="h-2.5 w-2.5 shrink-0 rounded-xs ring-1 ring-slate-300"
                     style={{ backgroundColor: item.color }}
                   />
-                  <span className="font-mono text-[10px] text-muted-foreground">{item.id}</span>
+                  <span className="font-mono text-[10px] text-slate-600">{item.id}</span>
                   <span className="min-w-0 leading-tight">
                     <span className="block truncate">{getCompactLabel(item.label)}</span>
-                    <span className="block truncate text-[10px] text-muted-foreground">
+                    <span className="block truncate text-[10px] text-slate-600">
                       {getIndonesianLabel(getCompactLabel(item.label))}
                     </span>
                   </span>
@@ -169,49 +159,55 @@ function LandcoverLegendPanel() {
   );
 }
 
-function VectorLegendPanel({ title, fillOpacity }: { title: string; fillOpacity: number }) {
+function VectorLegendPanel({
+  title,
+  fillOpacity,
+  groupingColumn,
+  groups,
+}: {
+  title: string;
+  fillOpacity: number;
+  groupingColumn?: string | null;
+  groups?: Array<{ value: string; color: string; count: number }>;
+}) {
   return (
-    <div className="rounded-md border border-border/60 p-2">
-      <div className="mb-2 text-xs font-semibold">{title}</div>
-      <div className="space-y-1.5 text-[11px]">
-        <div className="flex items-center gap-2">
-          <span className="h-0.5 w-5 rounded bg-[#ff3b30]" />
-          <span>Boundary stroke</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span
-            className="h-3 w-5 rounded border border-[#ff3b30]/70"
-            style={{ backgroundColor: `rgba(255, 59, 48, ${fillOpacity})` }}
-          />
-          <span>Polygon fill ({Math.round(fillOpacity * 100)}%)</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CanopyLegendPanel({ title, isLoading }: { title: string; isLoading: boolean }) {
-  return (
-    <div className="rounded-md border border-border/60 p-2">
-      <div className="mb-2 text-xs font-semibold">{title}</div>
-      {isLoading ? (
-        <div className="text-[11px] text-muted-foreground">Canopy tiles are still processing.</div>
-      ) : (
-        <div className="space-y-1.5 text-[11px]">
-          {CANOPY_COLOR_STOPS.filter((stop) => stop.value > 0).map((stop) => (
-            <div key={stop.value} className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-2">
-                <span
-                  className="h-2.5 w-4 rounded-xs ring-1 ring-black/20"
-                  style={{ backgroundColor: colorStopToCssColor(stop.color) }}
-                />
-                <span>{stop.value} m</span>
-              </span>
-              <span className="text-[10px] text-muted-foreground">canopy height</span>
+    <div className="rounded-md border border-slate-200/80 bg-white p-2.5">
+      <div className="mb-2 text-xs font-semibold text-slate-900">{title}</div>
+      <div className="space-y-1.5 text-[11px] text-slate-800">
+        {groupingColumn && groups && groups.length > 0 ? (
+          <>
+            <div className="text-[10px] text-slate-600">
+              Grouped by <span className="font-semibold text-slate-900">{groupingColumn}</span>
             </div>
-          ))}
-        </div>
-      )}
+            {groups.map((group) => (
+              <div key={`${group.value}:${group.color}`} className="flex items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span
+                    className="h-3 w-5 shrink-0 rounded border border-slate-300"
+                    style={{ backgroundColor: group.color, opacity: fillOpacity }}
+                  />
+                  <span className="truncate">{group.value}</span>
+                </span>
+                <span className="text-[10px] text-slate-600">{group.count}</span>
+              </div>
+            ))}
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="h-0.5 w-5 rounded bg-[#ff3b30]" />
+              <span>Boundary stroke</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className="h-3 w-5 rounded border border-[#ff3b30]/70"
+                style={{ backgroundColor: `rgba(255, 59, 48, ${fillOpacity})` }}
+              />
+              <span>Polygon fill ({Math.round(fillOpacity * 100)}%)</span>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -221,16 +217,21 @@ export function Legend({ open, onOpenChange, activeLayers }: LegendProps) {
 
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
-      <Card className="w-[min(68vw,15rem)] border-white/30 bg-card/90 shadow-lg backdrop-blur-sm">
-        <CardHeader className="pb-1.5 pt-3">
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle className="flex items-center gap-1.5 text-xs font-semibold">
-              <ListTree className="size-3.5" />
+      <Card className="flex w-[min(92vw,18rem)] flex-col overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-lg shadow-slate-950/10 backdrop-blur-sm">
+        <CardHeader className="py-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <ListTree className="size-4" />
               Layer Legends
             </CardTitle>
             <CollapsibleTrigger
               render={
-                <Button size="icon" variant="outline" aria-label="Toggle legend" className="size-7" />
+                <Button
+                  size="icon"
+                  variant="outline"
+                  aria-label="Toggle legend"
+                  className="size-7 border-slate-200 bg-white text-slate-900 hover:bg-slate-100"
+                />
               }
             >
               <ChevronDown
@@ -240,13 +241,13 @@ export function Legend({ open, onOpenChange, activeLayers }: LegendProps) {
           </div>
         </CardHeader>
         <CollapsibleContent>
-          <CardContent className="max-h-72 space-y-1.5 overflow-y-auto pb-3 pr-2.5">
-            <div className="text-[10px] text-muted-foreground">
+          <CardContent className="max-h-[calc(100dvh-10rem)] space-y-2 overflow-y-auto pb-3 pr-2 pt-0 md:max-h-[calc(100dvh-11rem)]">
+            <div className="text-[10px] text-slate-600">
               Active legend panels: {activeLayerCount}
             </div>
 
             {activeLayerCount === 0 ? (
-              <div className="rounded-md border border-border/60 p-2 text-[11px] text-muted-foreground">
+              <div className="rounded-md border border-slate-200/80 bg-white p-2 text-[11px] text-slate-700">
                 No visible colorized layers. Turn on a layer to see its legend.
               </div>
             ) : (
@@ -261,17 +262,13 @@ export function Legend({ open, onOpenChange, activeLayers }: LegendProps) {
                       key={layer.id}
                       title={layer.title}
                       fillOpacity={layer.fillOpacity}
+                      groupingColumn={layer.groupingColumn}
+                      groups={layer.groups}
                     />
                   );
                 }
 
-                return (
-                  <CanopyLegendPanel
-                    key={layer.id}
-                    title={layer.title}
-                    isLoading={layer.isLoading}
-                  />
-                );
+                return null;
               })
             )}
           </CardContent>

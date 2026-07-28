@@ -1,9 +1,7 @@
 "use client";
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import type { FeatureCollection, GeoJsonProperties, Geometry as GeoJsonGeometry } from "geojson";
 import type OLMap from "ol/Map";
-import type BaseLayer from "ol/layer/Base";
 import GeoJSON from "ol/format/GeoJSON";
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
@@ -13,7 +11,7 @@ import { Fill, Stroke, Style, Circle as CircleStyle } from "ol/style";
 import { createEmpty, extend, isEmpty } from "ol/extent";
 import { Upload } from "lucide-react";
 
-import { buildCommunityBoundaryGeoJson } from "@/lib/community-boundary";
+import { getGroupableColumns } from "@/lib/vector-grouping";
 import { filterVectorFiles, groupFilesByBaseName, parseVectorFile } from "@/lib/vector-import";
 
 type VectorDropzoneProps = {
@@ -22,14 +20,10 @@ type VectorDropzoneProps = {
   onVectorLayerAdd?: (
     fileName: string,
     payload: {
-      layer: BaseLayer;
+      layer: VectorLayer<VectorSource>;
       defaultFillOpacity: number;
-      setFillOpacity: (opacity: number) => void;
+      availableGroupingColumns: string[];
     },
-  ) => void;
-  onCanopyExtractionQueued?: (
-    fileName: string,
-    geometry?: FeatureCollection<GeoJsonGeometry, GeoJsonProperties>,
   ) => void;
 };
 
@@ -61,7 +55,6 @@ const VectorDropzone = forwardRef<VectorDropzoneHandle, VectorDropzoneProps>(fun
   map,
   onMessage,
   onVectorLayerAdd,
-  onCanopyExtractionQueued,
 }, ref) {
   const [isDragActive, setIsDragActive] = useState(false);
   const dragDepthRef = useRef(0);
@@ -164,7 +157,11 @@ const VectorDropzone = forwardRef<VectorDropzoneHandle, VectorDropzoneProps>(fun
         }
 
         const source = new VectorSource({ features });
-        let fillOpacity = DEFAULT_VECTOR_FILL_OPACITY;
+        const fillOpacity = DEFAULT_VECTOR_FILL_OPACITY;
+
+        const availableGroupingColumns = getGroupableColumns(
+          features.map((feature) => feature.getProperties() as Record<string, unknown>),
+        );
 
         const nextLayer = new VectorLayer({
           source,
@@ -176,11 +173,6 @@ const VectorDropzone = forwardRef<VectorDropzoneHandle, VectorDropzoneProps>(fun
           },
         });
 
-        const setFillOpacity = (opacity: number) => {
-          fillOpacity = opacity;
-          nextLayer.setStyle(createVectorStyle(fillOpacity));
-        };
-
         const existingLayer = layersRef.current.get(fileName);
         if (existingLayer) {
           map.removeLayer(existingLayer);
@@ -191,18 +183,9 @@ const VectorDropzone = forwardRef<VectorDropzoneHandle, VectorDropzoneProps>(fun
         onVectorLayerAdd?.(fileName, {
           layer: nextLayer,
           defaultFillOpacity: fillOpacity,
-          setFillOpacity,
+          availableGroupingColumns,
         });
 
-        // Queue canopy extraction and let layer controls trigger download.
-        const boundaryGeoJson = buildCommunityBoundaryGeoJson(parsed.geojson);
-        onCanopyExtractionQueued?.(fileName, boundaryGeoJson.boundary);
-
-        if (boundaryGeoJson.wasClipped) {
-          onMessage(
-            `${fileName}: AOI side ${boundaryGeoJson.requestedSideKilometers.toFixed(2)} km exceeded ${boundaryGeoJson.maxAllowedSideKilometers.toFixed(0)} km and was clipped to ${boundaryGeoJson.finalSideKilometers.toFixed(2)} km.`,
-          );
-        }
 
         totalAdded += features.length;
 
@@ -230,12 +213,11 @@ const VectorDropzone = forwardRef<VectorDropzoneHandle, VectorDropzoneProps>(fun
     });
 
     onMessage(
-      `Added ${totalAdded} vector feature${totalAdded === 1 ? "" : "s"}. Canopy Height is ready to generate from Layer Controls.`,
+      `Added ${totalAdded} vector feature${totalAdded === 1 ? "" : "s"}.`,
     );
   }, [
     geojsonFormat,
     map,
-    onCanopyExtractionQueued,
     onMessage,
     onVectorLayerAdd,
   ]);

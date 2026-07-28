@@ -37,3 +37,47 @@ function hexToRgb(hex: string): [number, number, number] {
 
 export const MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP: Record<number, [number, number, number]> =
   Object.fromEntries(MAPBIOMAS_CLASSES.map((item) => [item.id, hexToRgb(item.color)]));
+
+export function resolveMapbiomasClassCodeFromRgb(
+  red: number,
+  green: number,
+  blue: number,
+  alpha = 255,
+  tolerance = 2,
+): number | null {
+  if (alpha === 0) {
+    return null;
+  }
+
+  let bestClassId: number | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  const toleranceDistance = Math.max(0, tolerance) * Math.max(0, tolerance) * 3;
+
+  for (const [classIdText, color] of Object.entries(MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP)) {
+    const [targetRed, targetGreen, targetBlue] = color;
+    const distance =
+      Math.pow(targetRed - red, 2) +
+      Math.pow(targetGreen - green, 2) +
+      Math.pow(targetBlue - blue, 2);
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestClassId = Number(classIdText);
+    }
+
+    const isWithinChannelTolerance =
+      Math.abs(targetRed - red) <= tolerance &&
+      Math.abs(targetGreen - green) <= tolerance &&
+      Math.abs(targetBlue - blue) <= tolerance;
+
+    if (isWithinChannelTolerance) {
+      return Number(classIdText);
+    }
+  }
+
+  if (bestClassId === null || bestDistance > toleranceDistance) {
+    return null;
+  }
+
+  return bestClassId;
+}
