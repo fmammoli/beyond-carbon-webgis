@@ -55,7 +55,7 @@ export function ExportsPanel({
         Threat Map
       </Button>
       <p className="text-xs text-slate-700/90">
-        Generate a year-by-year MP4 from 1990 to 2024 using the 30 km aiming square.
+        Click Threat Map, aim the square on map, then click Generate.
       </p>
     </div>
   );

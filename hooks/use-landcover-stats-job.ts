@@ -36,6 +36,7 @@ type UseLandcoverStatsJobResult = UseLandcoverStatsJobState & {
     options?: StartJobOptions,
   ) => Promise<LandcoverStatsJobStatusResponse>;
   cancel: () => void;
+  reset: () => void;
   isPolling: boolean;
 };
 
@@ -152,6 +153,12 @@ export function useLandcoverStatsJob(options?: UseLandcoverStatsJobOptions): Use
 
   const cancel = useCallback(() => {
     logLandcoverStatsHookDebug("cancel_invoked");
+    resetController();
+    setState(INITIAL_STATE);
+  }, [resetController]);
+
+  const reset = useCallback(() => {
+    logLandcoverStatsHookDebug("reset_invoked");
     resetController();
     setState(INITIAL_STATE);
   }, [resetController]);
@@ -331,6 +338,7 @@ export function useLandcoverStatsJob(options?: UseLandcoverStatsJobOptions): Use
     ...state,
     startJob,
     cancel,
+    reset,
     isPolling: state.status === "queued" || state.status === "running",
   };
 }

@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Feature as GeoJsonFeature, FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
+import { bboxClip } from "@turf/turf";
 import type OLMap from "ol/Map";
 import type MapBrowserEvent from "ol/MapBrowserEvent";
 import type { Coordinate } from "ol/coordinate";
@@ -16,10 +17,10 @@ import Point from "ol/geom/Point";
 import Polygon from "ol/geom/Polygon";
 import { transform } from "ol/proj";
 import VectorSource from "ol/source/Vector";
-import TileState from "ol/TileState";
 import { getArea as getGeodesicArea, getDistance as getGeodesicDistance } from "ol/sphere";
 import XYZ from "ol/source/XYZ";
 import { Circle as CircleStyle, Fill, Stroke, Style } from "ol/style";
+import { getUid } from "ol/util";
 import "ol/ol.css";
 
 import {
@@ -31,8 +32,6 @@ import {
   PLAY_PREFETCH_MAX_VISIBLE_TILES,
   PLAY_PREFETCH_TILE_CONCURRENCY,
   PLAY_PREFETCH_YEAR_WINDOW,
-  THREAT_MAP_EXPORT_PRESETS,
-  THREAT_MAP_FRAME_DURATION_SECONDS,
   THREAT_MAP_SQUARE_SIDE_KM,
   type ThreatMapExportPreset,
 } from "@/lib/gis-constants";
@@ -57,8 +56,10 @@ import type { ActiveLegendLayer } from "@/components/gis/legend";
 import { PmtilesLayer } from "@/components/gis/pmtiles-layer";
 import { VectorDropzone, type VectorDropzoneHandle } from "@/components/gis/vector-dropzone";
 import { useLandcoverStatsJob } from "@/hooks/use-landcover-stats-job";
+import { useThreatMapJob } from "@/hooks/use-threat-map-job";
 import { MAPBIOMAS_CLASS_LOOKUP, resolveMapbiomasClassCodeFromRgb } from "@/lib/mapbiomas-colors";
 import { formatLandcoverStatsError } from "@/lib/landcover-stats";
+import { isThreatMapTerminalStatus } from "@/lib/threat-map";
 import {
   getPmtilesZoomRange,
   prefetchViewportPmtilesYears,
@@ -73,7 +74,6 @@ import {
   normalizeGroupValue,
 } from "@/lib/vector-grouping";
 import {
-  captureCompositedMapCanvas,
   getThreatMapPixelRect,
   type ThreatMapPixelRect,
 } from "@/lib/threat-map-export";
@@ -121,6 +121,7 @@ type SelectedVectorInfo = {
   areaSquareKilometers: number | null;
   areaHectares: number | null;
   selectionKey: string;
+  selectionUid: string;
 };
 
 type AreaMetrics = {
@@ -143,9 +144,12 @@ type PolygonDraftMetrics = {
 type ThreatMapExportStatus = "idle" | "aiming" | "generating";
 
 type ThreatMapProgress = {
-  frameIndex: number;
-  totalFrames: number;
-  year: number;
+  phaseLabel: string;
+  statusLabel: string;
+  percent: number | null;
+  frameIndex: number | null;
+  totalFrames: number | null;
+  year: number | null;
 };
 
 type ThreatMapExportDiagnostics = {
@@ -164,8 +168,6 @@ const DRAW_LAYER_Z_INDEX = 2300;
 const DRAW_CLOSE_TOLERANCE_PIXELS = 14;
 const MAX_COMMUNITY_BOUNDARY_BUFFER_KM = MAX_COMMUNITY_BOUNDARY_BUFFER_METERS / 1000;
 const DEFAULT_VECTOR_STROKE_COLOR = "#ff3b30";
-const FIRST_FRAME_GUARD_DURATION_SECONDS = 0.08;
-
 function rgbaFromHex(hexColor: string, alpha: number): string {
   const sanitized = hexColor.replace("#", "");
   if (sanitized.length !== 6) {
@@ -227,6 +229,42 @@ function createVectorStyle(fillOpacity: number, color = DEFAULT_VECTOR_STROKE_CO
   });
 }
 
+function createHighlightedVectorStyle(
+  fillOpacity: number,
+  color = DEFAULT_VECTOR_STROKE_COLOR,
+): Style[] {
+  return [
+    new Style({
+      stroke: new Stroke({
+        color: "#ffffff",
+        width: 6,
+      }),
+      fill: new Fill({
+        color: rgbaFromHex(color, Math.min(0.35, fillOpacity + 0.12)),
+      }),
+      image: new CircleStyle({
+        radius: 8,
+        fill: new Fill({ color: "#ffffff" }),
+        stroke: new Stroke({ color: "#ffffff", width: 2 }),
+      }),
+    }),
+    new Style({
+      stroke: new Stroke({
+        color,
+        width: 3,
+      }),
+      fill: new Fill({
+        color: rgbaFromHex(color, Math.min(0.45, fillOpacity + 0.18)),
+      }),
+      image: new CircleStyle({
+        radius: 6,
+        fill: new Fill({ color }),
+        stroke: new Stroke({ color: "#ffffff", width: 2 }),
+      }),
+    }),
+  ];
+}
+
 function collectGroupingStats(
   features: Feature<OlGeometry>[],
   groupingColumn: string | null,
@@ -255,8 +293,10 @@ function applyVectorLayerStyle(
   fillOpacity: number,
   groupingColumn: string | null,
   groupingValueColors: Record<string, string>,
+  selectedFeatureUidRef: { current: string | null },
 ) {
   const styleCache = new Map<string, Style>();
+  const highlightedStyleCache = new Map<string, Style[]>();
 
   layer.setStyle((feature) => {
     const featureGeometryType = feature.getGeometry()?.getType();
@@ -264,6 +304,8 @@ function applyVectorLayerStyle(
     const color = groupingColumn
       ? (groupingValueColors[groupValue] ?? DEFAULT_VECTOR_STROKE_COLOR)
       : DEFAULT_VECTOR_STROKE_COLOR;
+    const featureUid = getUid(feature);
+    const isSelected = selectedFeatureUidRef.current !== null && featureUid === selectedFeatureUidRef.current;
     const geometryBucket = featureGeometryType?.includes("Point")
       ? "point"
       : featureGeometryType?.includes("Line")
@@ -271,6 +313,18 @@ function applyVectorLayerStyle(
         : "polygon";
 
     const key = `${geometryBucket}:${color}:${fillOpacity}`;
+    if (isSelected) {
+      const highlightedKey = `${key}:selected`;
+      const existingHighlighted = highlightedStyleCache.get(highlightedKey);
+      if (existingHighlighted) {
+        return existingHighlighted;
+      }
+
+      const highlightedStyle = createHighlightedVectorStyle(fillOpacity, color);
+      highlightedStyleCache.set(highlightedKey, highlightedStyle);
+      return highlightedStyle;
+    }
+
     const existing = styleCache.get(key);
     if (existing) {
       return existing;
@@ -427,278 +481,76 @@ function createCenteredMaxSquareVertices(vertices: Coordinate[]): Coordinate[] {
   ];
 }
 
-function formatThreatMapYearLabel(year: number): string {
-  return String(year);
+type GeoJsonBbox = [number, number, number, number];
+
+function isCoordWithinBbox(coord: [number, number], bbox: GeoJsonBbox): boolean {
+  return coord[0] >= bbox[0]
+    && coord[0] <= bbox[2]
+    && coord[1] >= bbox[1]
+    && coord[1] <= bbox[3];
 }
 
-function drawThreatMapYearLabel(
-  context: CanvasRenderingContext2D,
-  year: number,
-  width: number,
-) {
-  const label = formatThreatMapYearLabel(year);
-  context.font = "700 54px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
-  context.textAlign = "left";
-  context.textBaseline = "top";
-
-  const paddingX = 20;
-  const paddingY = 12;
-  const margin = 20;
-  const metrics = context.measureText(label);
-  const textWidth = Math.ceil(metrics.width);
-  const labelWidth = textWidth + paddingX * 2;
-  const labelHeight = 54 + paddingY * 2;
-
-  const x = Math.max(margin, width - labelWidth - margin);
-  const y = margin;
-
-  context.fillStyle = "rgba(15, 23, 42, 0.74)";
-  context.fillRect(x, y, labelWidth, labelHeight);
-  context.fillStyle = "#f8fafc";
-  context.fillText(label, x + paddingX, y + paddingY);
-}
-
-function nextAnimationFrame(): Promise<void> {
-  return new Promise((resolve) => {
-    window.requestAnimationFrame(() => {
-      resolve();
-    });
-  });
-}
-
-function getThreatMapTileCoverageInRect(
-  map: OLMap,
-  layer: TileLayer<XYZ> | null,
-  pixelRect: ThreatMapPixelRect,
-  options?: {
-    maxIdleTileLoads?: number;
-  },
-): {
-  totalTiles: number;
-  resolvedTiles: number;
-  loadedTiles: number;
-  errorTiles: number;
-  idleTiles: number;
-  loadingTiles: number;
-} {
-  if (!layer?.getVisible()) {
-    return {
-      totalTiles: 0,
-      resolvedTiles: 0,
-      loadedTiles: 0,
-      errorTiles: 0,
-      idleTiles: 0,
-      loadingTiles: 0,
-    };
+function clipFeatureToBbox(
+  feature: GeoJsonFeature<Geometry, GeoJsonProperties>,
+  bbox: GeoJsonBbox,
+): GeoJsonFeature<Geometry, GeoJsonProperties> | null {
+  const geometry = feature.geometry;
+  if (!geometry) {
+    return null;
   }
 
-  const source = layer.getSource();
-  if (!source) {
-    return {
-      totalTiles: 0,
-      resolvedTiles: 0,
-      loadedTiles: 0,
-      errorTiles: 0,
-      idleTiles: 0,
-      loadingTiles: 0,
-    };
+  if (geometry.type === "Point") {
+    return isCoordWithinBbox(geometry.coordinates as [number, number], bbox) ? feature : null;
   }
 
-  const view = map.getView();
-  const projection = view.getProjection();
-  const resolution = view.getResolution();
-  if (!projection || resolution === undefined) {
-    return {
-      totalTiles: 0,
-      resolvedTiles: 0,
-      loadedTiles: 0,
-      errorTiles: 0,
-      idleTiles: 0,
-      loadingTiles: 0,
-    };
-  }
-
-  const tileGrid = source.getTileGridForProjection(projection);
-  if (!tileGrid) {
-    return {
-      totalTiles: 0,
-      resolvedTiles: 0,
-      loadedTiles: 0,
-      errorTiles: 0,
-      idleTiles: 0,
-      loadingTiles: 0,
-    };
-  }
-
-  const topLeft = map.getCoordinateFromPixel([pixelRect.left, pixelRect.top]);
-  const bottomRight = map.getCoordinateFromPixel([
-    pixelRect.left + pixelRect.width,
-    pixelRect.top + pixelRect.height,
-  ]);
-  if (!topLeft || !bottomRight) {
-    return {
-      totalTiles: 0,
-      resolvedTiles: 0,
-      loadedTiles: 0,
-      errorTiles: 0,
-      idleTiles: 0,
-      loadingTiles: 0,
-    };
-  }
-
-  const extent: Extent = [
-    Math.min(topLeft[0], bottomRight[0]),
-    Math.min(topLeft[1], bottomRight[1]),
-    Math.max(topLeft[0], bottomRight[0]),
-    Math.max(topLeft[1], bottomRight[1]),
-  ];
-
-  const zDirection = source.zDirection ?? 0;
-  const z = tileGrid.getZForResolution(resolution, zDirection);
-  const tileRange = tileGrid.getTileRangeForExtentAndZ(extent, z);
-  if (!tileRange) {
-    return {
-      totalTiles: 0,
-      resolvedTiles: 0,
-      loadedTiles: 0,
-      errorTiles: 0,
-      idleTiles: 0,
-      loadingTiles: 0,
-    };
-  }
-
-  const pixelRatio = map.getPixelRatio();
-  const maxIdleTileLoads = Math.max(0, options?.maxIdleTileLoads ?? 0);
-  let idleTileLoads = 0;
-  let totalTiles = 0;
-  let resolvedTiles = 0;
-  let loadedTiles = 0;
-  let errorTiles = 0;
-  let idleTiles = 0;
-  let loadingTiles = 0;
-
-  for (let x = tileRange.minX; x <= tileRange.maxX; x += 1) {
-    for (let y = tileRange.minY; y <= tileRange.maxY; y += 1) {
-      const tileCoord = source.getTileCoordForTileUrlFunction([z, x, y], projection);
-      if (!tileCoord) {
-        continue;
-      }
-
-      totalTiles += 1;
-
-      const tile = source.getTile(z, x, y, pixelRatio, projection);
-      const tileState = tile.getState();
-
-      if (tileState === TileState.IDLE) {
-        idleTiles += 1;
-
-        // Nudge only a small number of idle tiles per pass to avoid deadlocks
-        // without triggering request-exhaustion bursts.
-        if (idleTileLoads < maxIdleTileLoads) {
-          tile.load();
-          idleTileLoads += 1;
-        }
-
-        continue;
-      }
-
-      if (tileState === TileState.LOADING) {
-        loadingTiles += 1;
-        continue;
-      }
-
-      // EMPTY is a resolved no-data tile, so it should not block capture.
-      if (tileState === TileState.LOADED) {
-        resolvedTiles += 1;
-        loadedTiles += 1;
-        continue;
-      }
-
-      if (tileState === TileState.EMPTY) {
-        resolvedTiles += 1;
-        continue;
-      }
-
-      if (tileState === TileState.ERROR) {
-        // Treat hard errors as resolved so a single failed tile cannot deadlock the export.
-        resolvedTiles += 1;
-        errorTiles += 1;
-      }
-    }
-  }
-
-  return {
-    totalTiles,
-    resolvedTiles,
-    loadedTiles,
-    errorTiles,
-    idleTiles,
-    loadingTiles,
-  };
-}
-
-function getThreatMapRenderedCoverageRatio(
-  map: OLMap,
-  pixelRect: ThreatMapPixelRect,
-): number {
-  const compositedCanvas = captureCompositedMapCanvas(map);
-  if (!compositedCanvas) {
-    return 0;
-  }
-
-  const sampleSize = 96;
-  const sampleCanvas = document.createElement("canvas");
-  sampleCanvas.width = sampleSize;
-  sampleCanvas.height = sampleSize;
-
-  const sampleContext = sampleCanvas.getContext("2d", { willReadFrequently: true });
-  if (!sampleContext) {
-    return 0;
-  }
-
-  sampleContext.clearRect(0, 0, sampleSize, sampleSize);
-  sampleContext.drawImage(
-    compositedCanvas,
-    pixelRect.left,
-    pixelRect.top,
-    pixelRect.width,
-    pixelRect.height,
-    0,
-    0,
-    sampleSize,
-    sampleSize,
-  );
-
-  const imageData = sampleContext.getImageData(0, 0, sampleSize, sampleSize);
-  const pixels = imageData.data;
-
-  let sampledPixels = 0;
-  let classifiedPixels = 0;
-
-  for (let index = 0; index < pixels.length; index += 4) {
-    const red = pixels[index] ?? 0;
-    const green = pixels[index + 1] ?? 0;
-    const blue = pixels[index + 2] ?? 0;
-    const alpha = pixels[index + 3] ?? 0;
-
-    if (alpha === 0) {
-      continue;
+  if (geometry.type === "MultiPoint") {
+    const coordinates = geometry.coordinates.filter((coord) => isCoordWithinBbox(coord as [number, number], bbox));
+    if (coordinates.length === 0) {
+      return null;
     }
 
-    sampledPixels += 1;
-    const classCode = resolveMapbiomasClassCodeFromRgb(red, green, blue, alpha, 8);
+    return {
+      ...feature,
+      geometry: {
+        ...geometry,
+        coordinates,
+      },
+    };
+  }
 
-    // Exclude cloud / not-observed (class 27) from readiness coverage.
-    if (classCode !== null && classCode !== 27) {
-      classifiedPixels += 1;
+  try {
+    const clipped = bboxClip(feature as never, bbox) as GeoJsonFeature<Geometry, GeoJsonProperties>;
+    if (!clipped?.geometry) {
+      return null;
     }
+
+    return {
+      ...clipped,
+      properties: feature.properties,
+    };
+  } catch {
+    return feature;
+  }
+}
+
+function saveBlob(blob: Blob, filename: string): void {
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+function getImageExtensionFromPath(pathValue: string): string {
+  const match = pathValue.toLowerCase().match(/\.(png|jpg|jpeg|webp)$/);
+  if (!match) {
+    return "png";
   }
 
-  if (sampledPixels === 0) {
-    return 0;
-  }
-
-  return classifiedPixels / sampledPixels;
+  return match[1] === "jpeg" ? "jpg" : match[1]!;
 }
 
 export default function MapContainer() {
@@ -733,7 +585,6 @@ export default function MapContainer() {
     useState<PendingPolygonConfirmState | null>(null);
   const [threatMapExportStatus, setThreatMapExportStatus] =
     useState<ThreatMapExportStatus>("idle");
-  const [threatMapProgress, setThreatMapProgress] = useState<ThreatMapProgress | null>(null);
   const [threatMapError, setThreatMapError] = useState<string | null>(null);
   const [threatMapPixelRect, setThreatMapPixelRect] = useState<ThreatMapPixelRect | null>(null);
   const [threatMapDiagnostics, setThreatMapDiagnostics] =
@@ -743,6 +594,7 @@ export default function MapContainer() {
   const vectorDropzoneRef = useRef<VectorDropzoneHandle | null>(null);
   const drawingVerticesRef = useRef<Coordinate[]>([]);
   const drawingLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const selectedVectorUidRef = useRef<string | null>(null);
   const communityPolygonCounterRef = useRef(1);
   const geojsonFormatRef = useRef(new GeoJSON());
   const isFrameLoadingRef = useRef(isFrameLoading);
@@ -751,16 +603,32 @@ export default function MapContainer() {
   const threatMapAwaitTokenRef = useRef(0);
   const threatMapResolvedTokenRef = useRef(0);
   const threatMapDiagnosticsUpdateAtRef = useRef(0);
+  const threatMapDeliveredJobIdRef = useRef<string | null>(null);
   const landcoverStatsJob = useLandcoverStatsJob({
     baseUrl: process.env.NEXT_PUBLIC_LANDCOVER_STATS_API_BASE_URL,
     apiKey: process.env.NEXT_PUBLIC_LANDCOVER_STATS_API_KEY,
   });
+  const threatMapJob = useThreatMapJob({
+    apiKey: process.env.NEXT_PUBLIC_THREAT_MAP_API_KEY,
+    pollIntervalMs: 4000,
+    autoDownloadOnTerminal: true,
+    enableClientEncoding: true,
+  });
+  const resetLandcoverStatsJob = landcoverStatsJob.reset;
 
   const pmtilesBaseUrl =
     process.env.NEXT_PUBLIC_R2_PMTILES_BASE_URL ?? DEFAULT_R2_PMTILES_BASE_URL;
   const missingPmtilesUrl = !pmtilesBaseUrl;
-  const isThreatMapAiming = threatMapExportStatus === "aiming";
-  const isThreatMapGenerating = threatMapExportStatus === "generating";
+  const hasThreatMapDownload = Boolean(threatMapJob.encodedMp4Blob)
+    || threatMapJob.downloadedArtifact?.artifactType === "mp4";
+  const hasThreatMapFailure = threatMapJob.status === "failed"
+    || threatMapJob.status === "cancelled"
+    || Boolean(threatMapJob.encodingError);
+  const isThreatMapGenerating = threatMapExportStatus === "generating"
+    && !hasThreatMapDownload
+    && !hasThreatMapFailure;
+  const isThreatMapAiming = threatMapExportStatus === "aiming"
+    || (threatMapExportStatus === "generating" && (hasThreatMapDownload || hasThreatMapFailure));
 
   const onMapReady = useCallback((payload: MapCanvasReadyPayload) => {
     if (process.env.NODE_ENV !== "production") {
@@ -882,6 +750,7 @@ export default function MapContainer() {
         nextFillOpacity,
         nextGroupingColumn,
         groupingStats.valueColors,
+        selectedVectorUidRef,
       );
 
       return {
@@ -936,6 +805,7 @@ export default function MapContainer() {
         fillOpacity,
         existing.groupingColumn,
         existing.groupingValueColors,
+        selectedVectorUidRef,
       );
 
       return {
@@ -968,6 +838,7 @@ export default function MapContainer() {
         existing.fillOpacity,
         normalizedGrouping,
         groupingStats.valueColors,
+        selectedVectorUidRef,
       );
 
       return {
@@ -1026,11 +897,12 @@ export default function MapContainer() {
     threatMapResolvedTokenRef.current = 0;
     threatMapDiagnosticsUpdateAtRef.current = 0;
     setThreatMapError(null);
-    setThreatMapProgress(null);
     setThreatMapDiagnostics(null);
+    threatMapDeliveredJobIdRef.current = null;
+    threatMapJob.reset();
     setThreatMapExportStatus("aiming");
     setStatusMessage("Threat Map aiming is active. Pan or zoom, then click Generate.");
-  }, [cancelDrawing, isDrawingPolygon, mapContext.map]);
+  }, [cancelDrawing, isDrawingPolygon, mapContext.map, threatMapJob]);
 
   const onCancelThreatMap = useCallback((message = "Threat Map canceled.") => {
     threatMapCancelRef.current = true;
@@ -1039,12 +911,14 @@ export default function MapContainer() {
     threatMapResolvedTokenRef.current = 0;
     threatMapDiagnosticsUpdateAtRef.current = 0;
     setThreatMapExportStatus("idle");
-    setThreatMapProgress(null);
     setThreatMapDiagnostics(null);
     setThreatMapPixelRect(null);
     setThreatMapError(null);
+    if (threatMapJob.isPolling) {
+      void threatMapJob.cancel();
+    }
     setStatusMessage(message);
-  }, []);
+  }, [threatMapJob]);
 
   const onGenerateThreatMap = useCallback(async () => {
     if (!mapContext.map) {
@@ -1056,335 +930,264 @@ export default function MapContainer() {
 
     const frozenRect = getThreatMapPixelRect(map, THREAT_MAP_SQUARE_SIDE_KM);
     if (!frozenRect || !frozenRect.fitsViewport) {
-      setThreatMapError("Zoom in until the 30 km square fits fully inside the map viewport.");
-      setStatusMessage("Threat Map requires the full 30 km square to fit in view.");
+      setThreatMapError(`Zoom in until the ${THREAT_MAP_SQUARE_SIDE_KM} km square fits fully inside the map viewport.`);
+      setStatusMessage(`Threat Map requires the full ${THREAT_MAP_SQUARE_SIDE_KM} km square to fit in view.`);
       return;
     }
 
-    setIsPlaying(false);
+    const topLeft = map.getCoordinateFromPixel([frozenRect.left, frozenRect.top]);
+    const topRight = map.getCoordinateFromPixel([frozenRect.left + frozenRect.width, frozenRect.top]);
+    const bottomRight = map.getCoordinateFromPixel([frozenRect.left + frozenRect.width, frozenRect.top + frozenRect.height]);
+    const bottomLeft = map.getCoordinateFromPixel([frozenRect.left, frozenRect.top + frozenRect.height]);
 
-    if (!isLandcoverVisible) {
-      setIsLandcoverVisible(true);
-    }
+    const ring = [topLeft, topRight, bottomRight, bottomLeft, topLeft]
+      .map((coordinate) => [coordinate[0], coordinate[1]] as [number, number]);
 
-    const previousLandcoverOpacity = landcoverOpacity;
-    const didOverrideLandcoverOpacity = previousLandcoverOpacity < 1;
-    if (didOverrideLandcoverOpacity) {
-      setLandcoverOpacity(1);
-    }
+    const squareBbox3857: GeoJsonBbox = [
+      Math.min(...ring.map((coord) => coord[0])),
+      Math.min(...ring.map((coord) => coord[1])),
+      Math.max(...ring.map((coord) => coord[0])),
+      Math.max(...ring.map((coord) => coord[1])),
+    ];
 
-    setThreatMapExportStatus("generating");
-    setThreatMapError(null);
-    setThreatMapProgress(null);
-    setThreatMapDiagnostics(null);
-    threatMapCancelRef.current = false;
+    const squareExtent: Extent = [
+      Math.min(topLeft[0], topRight[0], bottomRight[0], bottomLeft[0]),
+      Math.min(topLeft[1], topRight[1], bottomRight[1], bottomLeft[1]),
+      Math.max(topLeft[0], topRight[0], bottomRight[0], bottomLeft[0]),
+      Math.max(topLeft[1], topRight[1], bottomRight[1], bottomLeft[1]),
+    ];
 
-    const waitForYearFrameReady = async (
-      targetYear: number,
-      transitionToken: number,
-      timeoutMs = 90_000,
-    ) => {
-      const startedAt = performance.now();
-      let stableReadyChecks = 0;
-      let latestCoverage = {
-        totalTiles: 0,
-        resolvedTiles: 0,
-        loadedTiles: 0,
-        errorTiles: 0,
-        idleTiles: 0,
-        loadingTiles: 0,
-      };
-      let latestRenderedCoverageRatio = 0;
-
-      while (true) {
-        if (threatMapCancelRef.current) {
-          throw new DOMException("Threat Map export canceled.", "AbortError");
-        }
-
-        map.renderSync();
-        await nextAnimationFrame();
-
-        const elapsedMs = performance.now() - startedAt;
-        const maxIdleTileLoads = elapsedMs > 1_500 ? 6 : elapsedMs > 700 ? 2 : 0;
-
-        const tileCoverage = getThreatMapTileCoverageInRect(map, pmtilesLayer, frozenRect, {
-          maxIdleTileLoads,
-        });
-        latestCoverage = tileCoverage;
-        const renderedCoverageRatio = getThreatMapRenderedCoverageRatio(map, frozenRect);
-        latestRenderedCoverageRatio = renderedCoverageRatio;
-        const resolvedCoverageRatio =
-          tileCoverage.totalTiles > 0
-            ? tileCoverage.resolvedTiles / tileCoverage.totalTiles
-            : 0;
-
-        const now = performance.now();
-        if (now - threatMapDiagnosticsUpdateAtRef.current >= 160) {
-          setThreatMapDiagnostics((previous) => ({
-            requestedYear: targetYear,
-            readyYear: previous?.readyYear ?? null,
-            awaitToken: transitionToken,
-            resolvedToken: threatMapResolvedTokenRef.current,
-            renderedCoverage: resolvedCoverageRatio,
-            frameLoading: isFrameLoadingRef.current,
-            matched: threatMapResolvedTokenRef.current === transitionToken,
-          }));
-          threatMapDiagnosticsUpdateAtRef.current = now;
-        }
-
-        const hasAnyTilesInSquare = tileCoverage.totalTiles > 0;
-        const hasNearFullTileCoverage =
-          hasAnyTilesInSquare
-          && resolvedCoverageRatio >= 0.98
-          && tileCoverage.loadingTiles === 0;
-
-        // Keep a rendered-pixel guard so we never capture basemap-only frames.
-        const hasSufficientRenderedCoverage = renderedCoverageRatio >= 0.02;
-
-        const hasReadySignal = threatMapResolvedTokenRef.current === transitionToken;
-        const candidateReady =
-          hasReadySignal
-          && !isFrameLoadingRef.current
-          && hasNearFullTileCoverage
-          && hasSufficientRenderedCoverage;
-
-        if (candidateReady) {
-          stableReadyChecks += 1;
-        } else {
-          stableReadyChecks = 0;
-        }
-
-        const requiredStableChecks = targetYear === MIN_YEAR ? 3 : 2;
-        if (stableReadyChecks >= requiredStableChecks) {
-          setThreatMapDiagnostics((previous) => {
-            if (!previous) {
-              return null;
-            }
-
-            return {
-              ...previous,
-              resolvedToken: threatMapResolvedTokenRef.current,
-              renderedCoverage: resolvedCoverageRatio,
-              frameLoading: false,
-              matched: true,
-            };
-          });
-          return;
-        }
-
-        if (performance.now() - startedAt > timeoutMs) {
-          throw new Error(
-            `Timed out while preparing landcover frame for ${targetYear}. ` +
-              `tiles total=${latestCoverage.totalTiles}, ` +
-              `resolved=${latestCoverage.resolvedTiles}, ` +
-              `loaded=${latestCoverage.loadedTiles}, ` +
-              `errors=${latestCoverage.errorTiles}, ` +
-              `idle=${latestCoverage.idleTiles}, ` +
-              `loading=${latestCoverage.loadingTiles}, ` +
-              `awaitedYear=${threatMapAwaitedYearRef.current ?? "none"}, ` +
-              `resolvedToken=${threatMapResolvedTokenRef.current}, ` +
-              `requiredToken=${transitionToken}, ` +
-              `renderedCoverage=${latestRenderedCoverageRatio.toFixed(4)}.`,
-          );
-        }
-
-        await nextAnimationFrame();
-      }
-    };
-
-    try {
-      if (didOverrideLandcoverOpacity) {
-        await nextAnimationFrame();
-        await nextAnimationFrame();
+    const overlayFeatures: Array<GeoJsonFeature<Geometry, GeoJsonProperties>> = [];
+    for (const [layerName, layerState] of Object.entries(vectorLayers)) {
+      if (!layerState.isVisible) {
+        continue;
       }
 
-      await nextAnimationFrame();
-      await nextAnimationFrame();
+      const features = layerState.layer.getSource()?.getFeatures() ?? [];
 
-      const pixelRatio = Math.max(1, map.getPixelRatio() || 1);
-      const selectedPreset = THREAT_MAP_EXPORT_PRESETS[threatMapExportPreset];
-      const exportSizePx = selectedPreset.sizePx;
-
-      const exportCanvas = document.createElement("canvas");
-      exportCanvas.width = exportSizePx;
-      exportCanvas.height = exportSizePx;
-
-      const exportContext = exportCanvas.getContext("2d");
-      if (!exportContext) {
-        throw new Error("Failed to initialize export canvas context.");
-      }
-      exportContext.imageSmoothingEnabled = false;
-
-      const {
-        BufferTarget,
-        CanvasSource,
-        Mp4OutputFormat,
-        Output,
-        QUALITY_HIGH,
-        getFirstEncodableVideoCodec,
-      } = await import("mediabunny");
-
-      const outputFormat = new Mp4OutputFormat();
-      const selectedCodec = await getFirstEncodableVideoCodec(
-        outputFormat.getSupportedVideoCodecs(),
-        { width: exportCanvas.width, height: exportCanvas.height },
-      );
-
-      if (!selectedCodec) {
-        throw new Error("This browser cannot encode MP4 video for Threat Map export.");
-      }
-
-      const target = new BufferTarget();
-      const output = new Output({
-        format: outputFormat,
-        target,
-      });
-
-      const videoSource = new CanvasSource(exportCanvas, {
-        codec: selectedCodec,
-        bitrate: QUALITY_HIGH,
-      });
-
-      output.addVideoTrack(videoSource);
-      await output.start();
-
-      const totalFrames = MAX_YEAR - MIN_YEAR + 1;
-      let frameTimestamp = 0;
-
-      for (let index = 0; index < totalFrames; index += 1) {
-        const exportYear = MIN_YEAR + index;
-
-        if (threatMapCancelRef.current) {
-          throw new DOMException("Threat Map export canceled.", "AbortError");
-        }
-
-        setThreatMapProgress({
-          frameIndex: index + 1,
-          totalFrames,
-          year: exportYear,
-        });
-
-        const transitionToken = threatMapAwaitTokenRef.current + 1;
-        threatMapAwaitTokenRef.current = transitionToken;
-        threatMapResolvedTokenRef.current = 0;
-        threatMapAwaitedYearRef.current = exportYear;
-        setThreatMapDiagnostics({
-          requestedYear: exportYear,
-          readyYear: null,
-          awaitToken: transitionToken,
-          resolvedToken: 0,
-          renderedCoverage: 0,
-          frameLoading: isFrameLoadingRef.current,
-          matched: false,
-        });
-
-        setYear(exportYear);
-        await waitForYearFrameReady(exportYear, transitionToken);
-        map.renderSync();
-        await nextAnimationFrame();
-
-        const compositedCanvas = captureCompositedMapCanvas(map);
-        if (!compositedCanvas) {
-          throw new Error(`Failed to capture map frame for ${exportYear}.`);
-        }
-
-        exportContext.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
-        exportContext.drawImage(
-          compositedCanvas,
-          frozenRect.left * pixelRatio,
-          frozenRect.top * pixelRatio,
-          frozenRect.width * pixelRatio,
-          frozenRect.height * pixelRatio,
-          0,
-          0,
-          exportCanvas.width,
-          exportCanvas.height,
-        );
-        drawThreatMapYearLabel(exportContext, exportYear, exportCanvas.width);
-
-        if (index === 0 && THREAT_MAP_FRAME_DURATION_SECONDS > FIRST_FRAME_GUARD_DURATION_SECONDS) {
-          await videoSource.add(frameTimestamp, FIRST_FRAME_GUARD_DURATION_SECONDS, {
-            keyFrame: true,
-          });
-          frameTimestamp += FIRST_FRAME_GUARD_DURATION_SECONDS;
-
-          await videoSource.add(
-            frameTimestamp,
-            THREAT_MAP_FRAME_DURATION_SECONDS - FIRST_FRAME_GUARD_DURATION_SECONDS,
-            {
-              keyFrame: true,
-            },
-          );
-          frameTimestamp += THREAT_MAP_FRAME_DURATION_SECONDS - FIRST_FRAME_GUARD_DURATION_SECONDS;
+      for (const feature of features) {
+        const geometry = feature.getGeometry();
+        if (!geometry || !geometry.intersectsExtent(squareExtent)) {
           continue;
         }
 
-        await videoSource.add(frameTimestamp, THREAT_MAP_FRAME_DURATION_SECONDS, {
-          keyFrame: true,
-        });
-        frameTimestamp += THREAT_MAP_FRAME_DURATION_SECONDS;
-      }
+        try {
+          const geometryObject = geojsonFormatRef.current.writeGeometryObject(geometry, {
+            dataProjection: "EPSG:3857",
+            featureProjection: "EPSG:3857",
+          }) as Geometry;
 
-      videoSource.close();
-      await output.finalize();
-      threatMapAwaitedYearRef.current = null;
-      threatMapAwaitTokenRef.current = 0;
-      threatMapResolvedTokenRef.current = 0;
-      threatMapDiagnosticsUpdateAtRef.current = 0;
-      setThreatMapDiagnostics(null);
+          const sourceProperties = feature.getProperties();
+          const sanitizedProperties: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(sourceProperties)) {
+            if (key === "geometry" || typeof value === "function" || value === undefined) {
+              continue;
+            }
 
-      const videoBuffer = target.buffer;
-      if (!videoBuffer) {
-        throw new Error("Threat Map export finished without an output buffer.");
-      }
+            try {
+              sanitizedProperties[key] = JSON.parse(JSON.stringify(value));
+            } catch {
+              // Skip non-serializable properties.
+            }
+          }
 
-      const blob = new Blob([videoBuffer], { type: "video/mp4" });
-      const objectUrl = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = `threat-map-${MIN_YEAR}-${MAX_YEAR}.mp4`;
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(objectUrl);
+          const overlayFeature: GeoJsonFeature<Geometry, GeoJsonProperties> = {
+            type: "Feature",
+            geometry: geometryObject,
+            properties: {
+              ...sanitizedProperties,
+              source: "threat-map-overlay",
+              layerName,
+              groupingColumn: layerState.groupingColumn,
+            },
+          };
 
-      setThreatMapExportStatus("idle");
-      setThreatMapProgress(null);
-      setStatusMessage("Threat Map video generated and downloaded.");
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        setThreatMapExportStatus("idle");
-        setThreatMapProgress(null);
-        setThreatMapDiagnostics(null);
-        setThreatMapError(null);
-        setStatusMessage("Threat Map generation canceled.");
-        return;
-      }
-
-      const message = error instanceof Error ? error.message : "Threat Map export failed.";
-      setThreatMapExportStatus("aiming");
-      setThreatMapProgress(null);
-      setThreatMapError(message);
-      setStatusMessage(`Threat Map export failed: ${message}`);
-      threatMapAwaitedYearRef.current = null;
-      threatMapAwaitTokenRef.current = 0;
-      threatMapResolvedTokenRef.current = 0;
-      threatMapDiagnosticsUpdateAtRef.current = 0;
-      setThreatMapDiagnostics(null);
-    } finally {
-      if (didOverrideLandcoverOpacity) {
-        setLandcoverOpacity(previousLandcoverOpacity);
+          const clippedOverlayFeature = clipFeatureToBbox(overlayFeature, squareBbox3857);
+          if (clippedOverlayFeature) {
+            overlayFeatures.push(clippedOverlayFeature);
+          }
+        } catch {
+          // Skip geometries that cannot be converted to GeoJSON.
+        }
       }
     }
+
+    const preset = threatMapExportPreset === "high" || threatMapExportPreset === "ultra"
+      ? "high"
+      : "balanced";
+
+    setThreatMapExportStatus("generating");
+    setThreatMapError(null);
+    setThreatMapDiagnostics(null);
+    threatMapDeliveredJobIdRef.current = null;
+
+    try {
+      await threatMapJob.submit({
+        geojson: {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              geometry: {
+                type: "Polygon",
+                coordinates: [ring],
+              },
+              properties: {
+                source: "threat-map-square",
+              },
+            },
+            ...overlayFeatures,
+          ],
+        },
+        preset,
+        outputFormat: "frames_tar_gz",
+      });
+      setStatusMessage(
+        `Threat Map job submitted. Generating... (${overlayFeatures.length} overlay feature${overlayFeatures.length === 1 ? "" : "s"} included)`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Threat Map export failed.";
+      setThreatMapExportStatus("aiming");
+      setThreatMapError(message);
+      setStatusMessage(`Threat Map export failed: ${message}`);
+    }
   }, [
-    isLandcoverVisible,
-    landcoverOpacity,
+    geojsonFormatRef,
     mapContext.map,
-    pmtilesLayer,
-    setLandcoverOpacity,
-    setIsLandcoverVisible,
+    threatMapJob,
     threatMapExportPreset,
+    vectorLayers,
   ]);
+
+  useEffect(() => {
+    if (threatMapExportStatus !== "generating") {
+      return;
+    }
+
+    if (threatMapJob.status === "idle" || threatMapJob.status === "submitting") {
+      return;
+    }
+
+    if (!isThreatMapTerminalStatus(threatMapJob.status)) {
+      return;
+    }
+
+    const alreadyDelivered = threatMapDeliveredJobIdRef.current === threatMapJob.jobId;
+    if (alreadyDelivered || !threatMapJob.jobId) {
+      return;
+    }
+
+    if (threatMapJob.encodedMp4Blob) {
+      saveBlob(threatMapJob.encodedMp4Blob, `threat-map-${MIN_YEAR}-${MAX_YEAR}.mp4`);
+
+      if (threatMapJob.boundaryFrames) {
+        const firstFrameExtension = getImageExtensionFromPath(threatMapJob.boundaryFrames.first.path);
+        const lastFrameExtension = getImageExtensionFromPath(threatMapJob.boundaryFrames.last.path);
+
+        saveBlob(
+          threatMapJob.boundaryFrames.first.blob,
+          `threat-map-${threatMapJob.boundaryFrames.first.year}.${firstFrameExtension}`,
+        );
+        saveBlob(
+          threatMapJob.boundaryFrames.last.blob,
+          `threat-map-${threatMapJob.boundaryFrames.last.year}.${lastFrameExtension}`,
+        );
+      }
+
+      threatMapDeliveredJobIdRef.current = threatMapJob.jobId;
+      return;
+    }
+
+    if (threatMapJob.downloadedArtifact?.artifactType === "mp4") {
+      saveBlob(
+        threatMapJob.downloadedArtifact.blob,
+        threatMapJob.downloadedArtifact.filename || `threat-map-${MIN_YEAR}-${MAX_YEAR}.mp4`,
+      );
+      threatMapDeliveredJobIdRef.current = threatMapJob.jobId;
+    }
+  }, [
+    threatMapExportStatus,
+    threatMapJob.currentYear,
+    threatMapJob.boundaryFrames,
+    threatMapJob.downloadedArtifact,
+    threatMapJob.encodedMp4Blob,
+    threatMapJob.encodingError,
+    threatMapJob.error,
+    threatMapJob.jobId,
+    threatMapJob.progress,
+    threatMapJob.status,
+  ]);
+
+  const threatMapDisplayProgress = useMemo<ThreatMapProgress | null>(() => {
+    if (!isThreatMapGenerating) {
+      return null;
+    }
+
+    if (threatMapJob.encodingProgress) {
+      const { stage, completed, total, message } = threatMapJob.encodingProgress;
+      const safeTotal = Number.isFinite(total) && total > 0 ? total : null;
+      const safeCompleted = Number.isFinite(completed) && completed >= 0 ? completed : 0;
+      const percent = safeTotal ? Math.round((safeCompleted / safeTotal) * 100) : null;
+
+      if (stage === "extracting") {
+        return {
+          phaseLabel: "Preparing frames",
+          statusLabel: message,
+          percent,
+          frameIndex: null,
+          totalFrames: safeTotal,
+          year: threatMapJob.currentYear ?? year,
+        };
+      }
+
+      if (stage === "parsing_manifest") {
+        return {
+          phaseLabel: "Reading manifest",
+          statusLabel: message,
+          percent,
+          frameIndex: null,
+          totalFrames: safeTotal,
+          year: threatMapJob.currentYear ?? year,
+        };
+      }
+
+      return {
+        phaseLabel: "Encoding MP4 in browser",
+        statusLabel: message,
+        percent,
+        frameIndex: safeTotal ? Math.min(safeTotal, Math.max(0, safeCompleted)) : null,
+        totalFrames: safeTotal,
+        year: threatMapJob.currentYear ?? year,
+      };
+    }
+
+    const progressValue = threatMapJob.progress ?? 0;
+    const clampedProgress = Math.max(0, Math.min(100, Math.round(progressValue)));
+    const totalFrames = MAX_YEAR - MIN_YEAR + 1;
+    const frameIndex = Math.max(1, Math.min(totalFrames, Math.round((clampedProgress / 100) * totalFrames)));
+
+    return {
+      phaseLabel: "Rendering yearly frames",
+      statusLabel: threatMapJob.message ?? "Threat Map job is running...",
+      percent: clampedProgress,
+      frameIndex,
+      totalFrames,
+      year: threatMapJob.currentYear ?? year,
+    };
+  }, [
+    isThreatMapGenerating,
+    threatMapJob.currentYear,
+    threatMapJob.encodingProgress,
+    threatMapJob.message,
+    threatMapJob.progress,
+    year,
+  ]);
+
+  const displayedThreatMapError =
+    threatMapError
+    ?? threatMapJob.error?.message
+    ?? threatMapJob.encodingError
+    ?? null;
 
   const commitPolygon = useCallback(
     (polygonToCommit: PendingPolygonConfirmState) => {
@@ -1493,6 +1296,15 @@ export default function MapContainer() {
           return prev;
         }
 
+        return null;
+      });
+
+      setSelectedVectorInfo((prev) => {
+        if (!prev || prev.layerName !== fileName) {
+          return prev;
+        }
+
+        selectedVectorUidRef.current = null;
         return null;
       });
 
@@ -1842,6 +1654,8 @@ export default function MapContainer() {
 
       if (!selectedVectorResult?.feature) {
         setSelectedVectorInfo(null);
+        selectedVectorUidRef.current = null;
+        mapContext.map?.renderSync();
         return;
       }
 
@@ -1867,6 +1681,10 @@ export default function MapContainer() {
         .slice(0, 6)
         .map((entry) => `${entry.key}=${entry.value}`)
         .join("|")}`;
+      const selectionUid = getUid(selectedVectorResult.feature);
+
+      selectedVectorUidRef.current = selectionUid;
+      mapContext.map?.renderSync();
 
       setSelectedVectorInfo({
         layerName: selectedVectorResult.layerName,
@@ -1877,6 +1695,7 @@ export default function MapContainer() {
         areaSquareKilometers: areaMetrics.areaSquareKilometers,
         areaHectares: areaMetrics.areaHectares,
         selectionKey,
+        selectionUid,
       });
     };
 
@@ -1886,6 +1705,13 @@ export default function MapContainer() {
       mapContext.map?.un("singleclick", handleMapSingleClick);
     };
   }, [isDrawingPolygon, mapContext.map, pendingPolygonConfirm, vectorLayers]);
+
+  useLayoutEffect(() => {
+    for (const vectorLayerState of Object.values(vectorLayers)) {
+      vectorLayerState.layer.changed();
+    }
+    mapContext.map?.renderSync();
+  }, [mapContext.map, selectedVectorInfo?.selectionUid, vectorLayers]);
 
   useEffect(() => {
     drawingVerticesRef.current = drawingVertices;
@@ -2027,6 +1853,44 @@ export default function MapContainer() {
           areaHectares: selectedPolygonInfo.areaHectares,
         }
       : null;
+  const selectedPolygonGeoJson = useMemo<FeatureCollection<Geometry, GeoJsonProperties> | null>(() => {
+    if (!selectedPolygonInfo?.geometry) {
+      return null;
+    }
+
+    try {
+      const geometry = new GeoJSON().writeGeometryObject(selectedPolygonInfo.geometry, {
+        dataProjection: "EPSG:4326",
+        featureProjection: "EPSG:3857",
+      }) as Geometry;
+
+      const properties = Object.fromEntries(
+        selectedPolygonInfo.properties.map((entry) => [entry.key, entry.value]),
+      );
+
+      const feature: GeoJsonFeature<Geometry, GeoJsonProperties> = {
+        type: "Feature",
+        geometry,
+        properties: {
+          ...properties,
+          layerName: selectedPolygonInfo.layerName,
+          groupingColumn: selectedPolygonInfo.groupingColumn,
+          groupingValue: selectedPolygonInfo.groupingValue,
+        },
+      };
+
+      return {
+        type: "FeatureCollection",
+        features: [feature],
+      };
+    } catch {
+      return null;
+    }
+  }, [selectedPolygonInfo]);
+
+  useEffect(() => {
+    resetLandcoverStatsJob();
+  }, [resetLandcoverStatsJob, selectedPolygonInfo?.selectionKey]);
 
   const onDownloadSelectedPolygonGeoJson = useCallback(() => {
     if (!selectedPolygonInfo?.geometry) {
@@ -2087,7 +1951,7 @@ export default function MapContainer() {
   }, [selectedPolygonInfo]);
 
   const onRunLandcoverStats = useCallback(async () => {
-    if (!selectedPolygonInfo?.geometry) {
+    if (!selectedPolygonGeoJson || !selectedPolygonInfo) {
       setStatusMessage("No polygon geometry selected for landcover stats.");
       return;
     }
@@ -2103,35 +1967,10 @@ export default function MapContainer() {
     }
 
     try {
-      const geometry = geojsonFormatRef.current.writeGeometryObject(selectedPolygonInfo.geometry, {
-        dataProjection: "EPSG:4326",
-        featureProjection: "EPSG:3857",
-      }) as Geometry;
-
-      const properties = Object.fromEntries(
-        selectedPolygonInfo.properties.map((entry) => [entry.key, entry.value]),
-      );
-
-      const feature: GeoJsonFeature<Geometry, GeoJsonProperties> = {
-        type: "Feature",
-        geometry,
-        properties: {
-          ...properties,
-          layerName: selectedPolygonInfo.layerName,
-          groupingColumn: selectedPolygonInfo.groupingColumn,
-          groupingValue: selectedPolygonInfo.groupingValue,
-        },
-      };
-
-      const payload: FeatureCollection<Geometry, GeoJsonProperties> = {
-        type: "FeatureCollection",
-        features: [feature],
-      };
-
       setStatusMessage(`Queued landcover stats for ${selectedPolygonInfo.layerName}.`);
 
       await landcoverStatsJob.startJob({
-        geojson: payload,
+        geojson: selectedPolygonGeoJson,
         baselineYear: landcoverStatsBaselineYear,
         comparisonYear: year,
       });
@@ -2141,7 +1980,7 @@ export default function MapContainer() {
       const message = formatLandcoverStatsError(error);
       setStatusMessage(`Landcover stats failed for ${selectedPolygonInfo.layerName}: ${message}`);
     }
-  }, [landcoverStatsBaselineYear, landcoverStatsJob, selectedPolygonInfo, year]);
+  }, [landcoverStatsBaselineYear, landcoverStatsJob, selectedPolygonGeoJson, selectedPolygonInfo, year]);
 
   const onCancelLandcoverStats = useCallback(() => {
     landcoverStatsJob.cancel();
@@ -2361,19 +2200,27 @@ export default function MapContainer() {
               Aim a fixed {THREAT_MAP_SQUARE_SIDE_KM} km square, then generate MP4 ({MIN_YEAR}-{MAX_YEAR}).
             </div>
 
-            {threatMapError ? (
+            {displayedThreatMapError ? (
               <div className="pointer-events-none absolute bottom-20 left-1/2 max-w-[min(90vw,36rem)] -translate-x-1/2 rounded-md border border-rose-200 bg-rose-50/95 px-3 py-2 text-xs text-rose-900 shadow-lg">
-                {threatMapError}
+                {displayedThreatMapError}
               </div>
             ) : null}
 
-            {isThreatMapGenerating && threatMapProgress ? (
+            {isThreatMapGenerating && threatMapDisplayProgress ? (
               <div className="pointer-events-none absolute right-4 top-4 rounded-md border border-cyan-200 bg-white/95 px-3 py-2 text-xs text-slate-900 shadow-lg">
-                <p className="font-semibold">Generating Threat Map...</p>
-                <p className="mt-1">Year: {threatMapProgress.year}</p>
-                <p>
-                  Frame: {threatMapProgress.frameIndex} / {threatMapProgress.totalFrames}
-                </p>
+                <p className="font-semibold">{threatMapDisplayProgress.phaseLabel}</p>
+                <p className="mt-1">{threatMapDisplayProgress.statusLabel}</p>
+                {threatMapDisplayProgress.percent !== null ? (
+                  <p>Progress: {threatMapDisplayProgress.percent}%</p>
+                ) : null}
+                {threatMapDisplayProgress.year !== null ? (
+                  <p>Year: {threatMapDisplayProgress.year}</p>
+                ) : null}
+                {threatMapDisplayProgress.frameIndex !== null && threatMapDisplayProgress.totalFrames !== null ? (
+                  <p>
+                    Frame: {threatMapDisplayProgress.frameIndex} / {threatMapDisplayProgress.totalFrames}
+                  </p>
+                ) : null}
                 {threatMapDiagnostics ? (
                   <>
                     <p className="mt-1 font-mono text-[11px]">

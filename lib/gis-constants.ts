@@ -25,7 +25,7 @@ export const LANDCOVER_FLIP_Y = false;
 export const LANDCOVER_MAX_OVERZOOM_DELTA = 10;
 
 // Threat Map export settings.
-export const THREAT_MAP_SQUARE_SIDE_KM = 30;
+export const THREAT_MAP_SQUARE_SIDE_KM = 20;
 export const THREAT_MAP_FRAME_DURATION_SECONDS = 1.5;
 export const THREAT_MAP_EXPORT_SIZE_PX = 1024;
 
