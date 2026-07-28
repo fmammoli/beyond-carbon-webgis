@@ -1,6 +1,6 @@
 const CANVAS_READBACK_PATCH_FLAG = "__bcCanvasReadbackPatched";
 
-type CanvasPrototypeWithPatchFlag = HTMLCanvasElement["prototype"] & {
+type CanvasPrototypeWithPatchFlag = HTMLCanvasElement & {
   [CANVAS_READBACK_PATCH_FLAG]?: boolean;
 };
 

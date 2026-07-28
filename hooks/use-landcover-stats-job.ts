@@ -7,7 +7,6 @@ import {
   formatLandcoverStatsError,
   type LandcoverStatsApiError,
   type LandcoverStatsJobCreateRequest,
-  type LandcoverStatsJobError,
   type LandcoverStatsJobStatus,
   type LandcoverStatsJobStatusResponse,
   type LandcoverStatsPollOptions,
@@ -15,6 +14,7 @@ import {
 } from "@/lib/landcover-stats";
 
 type UseLandcoverStatsJobOptions = Omit<LandcoverStatsPollOptions, "signal" | "onUpdate" | "wait">;
+type LandcoverStatsJobError = NonNullable<LandcoverStatsJobStatusResponse["error"]>;
 
 type UseLandcoverStatsJobState = {
   status: "idle" | "submitting" | LandcoverStatsJobStatus;

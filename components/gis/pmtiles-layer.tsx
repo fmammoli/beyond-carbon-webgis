@@ -18,8 +18,10 @@ type PmtilesLayerProps = {
   opacity: number;
   renderMode: PmtilesRenderMode;
   baseUrl: string;
+  prefetchNeighbors?: boolean;
   onLayerReady?: (layer: TileLayer<XYZ> | null) => void;
   onFrameLoadingChange?: (loading: boolean) => void;
+  onYearFrameReady?: (readyYear: number) => void;
 };
 
 export function PmtilesLayer({
@@ -29,14 +31,15 @@ export function PmtilesLayer({
   opacity,
   renderMode,
   baseUrl,
+  prefetchNeighbors = true,
   onLayerReady,
   onFrameLoadingChange,
+  onYearFrameReady,
 }: PmtilesLayerProps) {
   const activeLayerRef = useRef<TileLayer<XYZ> | null>(null);
   const stagingLayerRef = useRef<TileLayer<XYZ> | null>(null);
   const sourceCacheRef = useRef(new globalThis.Map<string, XYZ>());
   const transitionTokenRef = useRef(0);
-  const initialConfigRef = useRef({ year, renderMode, visible, opacity });
 
   const getCacheKey = (targetYear: number, mode: PmtilesRenderMode): string => `${targetYear}:${mode}`;
 
@@ -45,22 +48,23 @@ export function PmtilesLayer({
       return;
     }
 
-    const initialConfig = initialConfigRef.current;
-    const source = createPmtilesXyzSource(baseUrl, initialConfig.year, initialConfig.renderMode);
+    const source = createPmtilesXyzSource(baseUrl, year, renderMode);
     const sourceCache = sourceCacheRef.current;
-    sourceCache.set(getCacheKey(initialConfig.year, initialConfig.renderMode), source);
+    sourceCache.set(getCacheKey(year, renderMode), source);
 
     const layer = new TileLayer({
       source,
-      visible: initialConfig.visible,
-      opacity: initialConfig.opacity,
+      visible,
+      opacity,
       zIndex: 10,
     });
 
     activeLayerRef.current = layer;
     onLayerReady?.(layer);
     map.addLayer(layer);
-    prefetchAdjacentPmtiles(baseUrl, initialConfig.year);
+    if (prefetchNeighbors) {
+      prefetchAdjacentPmtiles(baseUrl, year);
+    }
 
     return () => {
       transitionTokenRef.current += 1;
@@ -79,7 +83,17 @@ export function PmtilesLayer({
       onFrameLoadingChange?.(false);
       sourceCache.clear();
     };
-  }, [baseUrl, map, onFrameLoadingChange, onLayerReady]);
+  }, [
+    baseUrl,
+    map,
+    onFrameLoadingChange,
+    onLayerReady,
+    opacity,
+    prefetchNeighbors,
+    renderMode,
+    visible,
+    year,
+  ]);
 
   useEffect(() => {
     const activeLayer = activeLayerRef.current;
@@ -96,14 +110,20 @@ export function PmtilesLayer({
     }
 
     if (activeLayer.getSource() === source) {
-      prefetchAdjacentPmtiles(baseUrl, year);
+      if (prefetchNeighbors) {
+        prefetchAdjacentPmtiles(baseUrl, year);
+      }
+      onYearFrameReady?.(year);
       return;
     }
 
     if (!visible) {
       activeLayer.setSource(source);
       onFrameLoadingChange?.(false);
-      prefetchAdjacentPmtiles(baseUrl, year);
+      onYearFrameReady?.(year);
+      if (prefetchNeighbors) {
+        prefetchAdjacentPmtiles(baseUrl, year);
+      }
       return;
     }
 
@@ -165,7 +185,10 @@ export function PmtilesLayer({
 
       onLayerReady?.(currentStagingLayer);
       onFrameLoadingChange?.(false);
-      prefetchAdjacentPmtiles(baseUrl, year);
+      onYearFrameReady?.(year);
+      if (prefetchNeighbors) {
+        prefetchAdjacentPmtiles(baseUrl, year);
+      }
     };
 
     const maybeFinalizeSwap = () => {
@@ -196,6 +219,14 @@ export function PmtilesLayer({
     source.on("tileloadend", handleTileLoadEnd);
     source.on("tileloaderror", handleTileLoadError);
 
+    // Cached tiles can render without emitting tile load events, so probe once
+    // shortly after staging and complete the swap if no loads were reported.
+    const cachedTileProbeTimer = window.setTimeout(() => {
+      if (startedTileCount === 0) {
+        finalizeSwap();
+      }
+    }, 250);
+
     const fallbackTimer = window.setTimeout(() => {
       // Only force a swap if at least one tile rendered; otherwise keep current frame.
       if (successfulTileCount > 0) {
@@ -212,13 +243,25 @@ export function PmtilesLayer({
     }, 8000);
 
     return () => {
+      window.clearTimeout(cachedTileProbeTimer);
       window.clearTimeout(fallbackTimer);
 
       if (!didSwap) {
         cleanupListeners();
       }
     };
-  }, [baseUrl, map, onFrameLoadingChange, onLayerReady, opacity, renderMode, visible, year]);
+  }, [
+    baseUrl,
+    map,
+    onFrameLoadingChange,
+    onLayerReady,
+    onYearFrameReady,
+    opacity,
+    prefetchNeighbors,
+    renderMode,
+    visible,
+    year,
+  ]);
 
   useEffect(() => {
     activeLayerRef.current?.setVisible(visible);

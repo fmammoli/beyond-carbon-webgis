@@ -23,3 +23,25 @@ export const LANDCOVER_FLIP_Y = false;
 
 // Allow a limited number of overzoom levels before hiding landcover tiles.
 export const LANDCOVER_MAX_OVERZOOM_DELTA = 10;
+
+// Threat Map export settings.
+export const THREAT_MAP_SQUARE_SIDE_KM = 30;
+export const THREAT_MAP_FRAME_DURATION_SECONDS = 1.5;
+export const THREAT_MAP_EXPORT_SIZE_PX = 1024;
+
+export const THREAT_MAP_EXPORT_PRESETS = {
+	balanced: {
+		label: "Balanced",
+		sizePx: THREAT_MAP_EXPORT_SIZE_PX,
+	},
+	high: {
+		label: "High",
+		sizePx: 1536,
+	},
+	ultra: {
+		label: "Ultra",
+		sizePx: 2048,
+	},
+} as const;
+
+export type ThreatMapExportPreset = keyof typeof THREAT_MAP_EXPORT_PRESETS;

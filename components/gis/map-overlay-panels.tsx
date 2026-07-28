@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Layers, MapPlus } from "lucide-react";
+import { ChevronDown, ChevronRight, Layers, MapPlus, Video } from "lucide-react";
 
 import { Legend, type ActiveLegendLayer } from "@/components/gis/legend";
 import { MapControls } from "@/components/gis/map-controls";
@@ -55,6 +55,7 @@ type MapTopPanelsProps = {
   onCancelLandcoverStats: () => void;
   landcoverStatsJob: LandcoverStatsJobViewState;
   primaryAction?: ReactNode;
+  exportsAction?: ReactNode;
 };
 
 type OverlayHoverBoundaryProps = {
@@ -166,25 +167,37 @@ export function MapTopPanels({
   onCancelLandcoverStats,
   landcoverStatsJob,
   primaryAction,
+  exportsAction,
 }: MapTopPanelsProps) {
   const hasCommunityPanel = Boolean(primaryAction);
+  const hasExportsPanel = Boolean(exportsAction);
+  const hasTabbedPanels = hasCommunityPanel || hasExportsPanel;
+  const tabColumnCount = hasCommunityPanel && hasExportsPanel ? 3 : 2;
 
   return (
     <div className="absolute left-3 right-3 top-3 md:left-5 md:right-5 md:top-5">
       <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <div className="pointer-events-auto flex h-[calc(100dvh-5.5rem)] w-full min-h-0 md:h-[calc(100dvh-6.5rem)] md:w-auto md:min-w-[18rem]">
           <Card className="flex h-full min-h-0 w-[min(92vw,18rem)] flex-col border-white/30 bg-card/85 shadow-lg backdrop-blur-sm">
-            {hasCommunityPanel ? (
+            {hasTabbedPanels ? (
               <Tabs defaultValue="layers" className="min-h-0 flex-1 gap-0 px-2 pb-2 pt-2">
-                <TabsList className="grid w-full grid-cols-2">
+                <TabsList className="grid w-full" style={{ gridTemplateColumns: `repeat(${tabColumnCount}, minmax(0, 1fr))` }}>
                   <TabsTrigger value="layers" aria-label="Open layer controls tab">
                     <Layers />
                     Layers
                   </TabsTrigger>
-                  <TabsTrigger value="community" aria-label="Open community map tab">
-                    <MapPlus />
-                    Community
-                  </TabsTrigger>
+                  {hasCommunityPanel ? (
+                    <TabsTrigger value="community" aria-label="Open community map tab">
+                      <MapPlus />
+                      Community
+                    </TabsTrigger>
+                  ) : null}
+                  {hasExportsPanel ? (
+                    <TabsTrigger value="exports" aria-label="Open exports tab">
+                      <Video />
+                      Exports
+                    </TabsTrigger>
+                  ) : null}
                 </TabsList>
                 <TabsContent value="layers" className="min-h-0 flex-1 overflow-hidden pb-0 pt-1">
                   <CardContent className="min-h-0 h-full overflow-hidden px-0 pb-0 pt-0">
@@ -201,13 +214,24 @@ export function MapTopPanels({
                     />
                   </CardContent>
                 </TabsContent>
-                <TabsContent value="community" className="min-h-0 flex-1 overflow-hidden pb-0 pt-1">
-                  <CardContent className="min-h-0 h-full overflow-hidden px-0 pb-0 pt-0">
-                    <div className="min-h-0 h-full rounded-md border border-cyan-200/60 bg-cyan-50/40 p-2">
-                      {primaryAction}
-                    </div>
-                  </CardContent>
-                </TabsContent>
+                {hasCommunityPanel ? (
+                  <TabsContent value="community" className="min-h-0 flex-1 overflow-hidden pb-0 pt-1">
+                    <CardContent className="min-h-0 h-full overflow-hidden px-0 pb-0 pt-0">
+                      <div className="min-h-0 h-full rounded-md border border-cyan-200/60 bg-cyan-50/40 p-2">
+                        {primaryAction}
+                      </div>
+                    </CardContent>
+                  </TabsContent>
+                ) : null}
+                {hasExportsPanel ? (
+                  <TabsContent value="exports" className="min-h-0 flex-1 overflow-hidden pb-0 pt-1">
+                    <CardContent className="min-h-0 h-full overflow-hidden px-0 pb-0 pt-0">
+                      <div className="min-h-0 h-full rounded-md border border-cyan-200/60 bg-cyan-50/40 p-2">
+                        {exportsAction}
+                      </div>
+                    </CardContent>
+                  </TabsContent>
+                ) : null}
               </Tabs>
             ) : (
               <CardContent className="min-h-0 flex-1 overflow-hidden px-2 pb-2 pt-2">
