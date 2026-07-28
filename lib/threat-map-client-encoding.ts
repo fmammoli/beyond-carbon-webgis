@@ -117,9 +117,17 @@ function parseTarEntries(bytes: Uint8Array): TarEntry[] {
   return entries;
 }
 
+function toBlobSafeBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  const copy = new Uint8Array(new ArrayBuffer(bytes.byteLength));
+  copy.set(bytes);
+  return copy;
+}
+
 async function gunzipBytes(input: Uint8Array): Promise<Uint8Array> {
   if (typeof DecompressionStream !== "undefined") {
-    const stream = new Blob([input]).stream().pipeThrough(new DecompressionStream("gzip"));
+    // Normalize to an ArrayBuffer-backed view so BlobPart typing stays compatible across TS lib targets.
+    const blobSafeBytes = toBlobSafeBytes(input);
+    const stream = new Blob([blobSafeBytes.buffer]).stream().pipeThrough(new DecompressionStream("gzip"));
     const decompressed = await new Response(stream).arrayBuffer();
     return new Uint8Array(decompressed);
   }
@@ -207,7 +215,7 @@ function resolveFramePathList(entries: TarEntry[], manifest: ThreatMapFramesMani
       fromManifest.push({
         year: inferredYear,
         path: matchedEntry.path,
-        blob: new Blob([matchedEntry.bytes], { type: "image/png" }),
+        blob: new Blob([toBlobSafeBytes(matchedEntry.bytes)], { type: "image/png" }),
       });
     }
   }
@@ -228,7 +236,7 @@ function resolveFramePathList(entries: TarEntry[], manifest: ThreatMapFramesMani
         ? {
             year,
             path: entry.path,
-            blob: new Blob([entry.bytes], { type: "image/png" }),
+            blob: new Blob([toBlobSafeBytes(entry.bytes)], { type: "image/png" }),
           }
         : null;
     })
@@ -402,6 +410,12 @@ type WorkerErrorMessage = {
 
 type WorkerResponseMessage = WorkerProgressMessage | WorkerDoneMessage | WorkerErrorMessage;
 
+function isWorkerEncodableArtifactType(
+  artifactType: ThreatMapArtifactDownloadResult["artifactType"],
+): artifactType is "frames_tar_gz" | "zip" {
+  return artifactType === "frames_tar_gz" || artifactType === "zip";
+}
+
 function canUseThreatMapEncodingWorker(): boolean {
   return typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined";
 }
@@ -419,6 +433,10 @@ async function encodeFramesToMp4WithWorker(
   try {
     const artifactBuffer = await artifact.blob.arrayBuffer();
     const transferList = [artifactBuffer];
+
+    if (!isWorkerEncodableArtifactType(artifact.artifactType)) {
+      throw new Error("Threat map worker only supports archive artifacts.");
+    }
 
     const requestMessage: WorkerEncodeRequest = {
       type: "encodeArtifact",

@@ -308,12 +308,14 @@ function resolveFrameEntries(entries: TarEntry[], manifest: ThreatMapFramesManif
     .sort((a, b) => a.year - b.year || a.path.localeCompare(b.path));
 }
 
-function normalizeOutputBuffer(buffer: Uint8Array | ArrayBuffer): ArrayBuffer {
-  if (buffer instanceof ArrayBuffer) {
-    return buffer;
+function normalizeOutputBuffer(buffer: Uint8Array | ArrayBufferLike): ArrayBuffer {
+  if (buffer instanceof Uint8Array) {
+    const copied = new Uint8Array(new ArrayBuffer(buffer.byteLength));
+    copied.set(buffer);
+    return copied.buffer;
   }
 
-  return new Uint8Array(buffer).slice().buffer;
+  return toArrayBuffer(buffer);
 }
 
 async function encodeFramesToMp4InWorker(
@@ -442,8 +444,8 @@ self.onmessage = async (event: MessageEvent<EncodeRequestMessage>) => {
     const firstFrame = sortedFrames[0]!;
     const lastFrame = sortedFrames[sortedFrames.length - 1]!;
 
-    const firstFrameBuffer = normalizeOutputBuffer(firstFrame.bytes.buffer);
-    const lastFrameBuffer = normalizeOutputBuffer(lastFrame.bytes.buffer);
+    const firstFrameBuffer = normalizeOutputBuffer(firstFrame.bytes);
+    const lastFrameBuffer = normalizeOutputBuffer(lastFrame.bytes);
 
     const doneMessage: WorkerDoneMessage = {
       type: "done",
