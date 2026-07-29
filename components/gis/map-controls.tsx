@@ -18,12 +18,16 @@ type MapControlsProps = {
   landcoverOpacity: number;
   isAgbVisible: boolean;
   agbOpacity: number;
+  isChmVisible: boolean;
+  chmOpacity: number;
   onSatelliteChange: (visible: boolean) => void;
   onBoundariesAndPlacesChange: (visible: boolean) => void;
   onLandcoverChange: (visible: boolean) => void;
   onLandcoverOpacityChange: (opacity: number) => void;
   onAgbChange: (visible: boolean) => void;
   onAgbOpacityChange: (opacity: number) => void;
+  onChmChange: (visible: boolean) => void;
+  onChmOpacityChange: (opacity: number) => void;
   embedded?: boolean;
 };
 
@@ -117,12 +121,16 @@ export function MapControls({
   landcoverOpacity,
   isAgbVisible,
   agbOpacity,
+  isChmVisible,
+  chmOpacity,
   onSatelliteChange,
   onBoundariesAndPlacesChange,
   onLandcoverChange,
   onLandcoverOpacityChange,
   onAgbChange,
   onAgbOpacityChange,
+  onChmChange,
+  onChmOpacityChange,
   embedded = false,
 }: MapControlsProps) {
   const controlsContent = (
@@ -160,6 +168,16 @@ export function MapControls({
           onOpacityChange={onAgbOpacityChange}
           switchAriaLabel="Toggle above ground biomass layer"
           sliderAriaLabel="Set above ground biomass opacity"
+        />
+        <ToggleOpacityRow
+          icon={<Layers className="size-4" />}
+          label="Canopy Height Model Layer"
+          checked={isChmVisible}
+          opacity={chmOpacity}
+          onCheckedChange={onChmChange}
+          onOpacityChange={onChmOpacityChange}
+          switchAriaLabel="Toggle canopy height model layer"
+          sliderAriaLabel="Set canopy height model opacity"
         />
     </div>
   );

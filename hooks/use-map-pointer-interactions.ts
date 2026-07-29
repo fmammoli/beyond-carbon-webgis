@@ -14,8 +14,12 @@ import {
   AGB_SCALE_FACTOR,
   AGB_TRANSPARENT_RAW_THRESHOLD,
   getAgbDisplayColor,
-  normalizeRawAgbToLegendValue,
 } from "@/lib/agb-legend";
+import {
+  CHM_SCALE_FACTOR,
+  CHM_TRANSPARENT_RAW_THRESHOLD,
+  getChmDisplayColor,
+} from "@/lib/chm-legend";
 import { resolveMapbiomasClassCodeFromRgb } from "@/lib/mapbiomas-colors";
 import type { PmtilesZoomRange } from "@/lib/pmtiles-source";
 import { normalizeGroupValue } from "@/lib/vector-grouping";
@@ -34,6 +38,16 @@ export type HoverPixelInfo = {
 };
 
 export type HoverAgbPixelInfo = {
+  rawValue: number;
+  scaledValue: number;
+  color: string;
+  pixelX: number;
+  pixelY: number;
+  requestedZoom: number | null;
+  sourceZoom: number | null;
+};
+
+export type HoverChmPixelInfo = {
   rawValue: number;
   scaledValue: number;
   color: string;
@@ -68,6 +82,7 @@ type UseMapPointerInteractionsParams = {
   map: OLMap | null;
   isLandcoverVisible: boolean;
   isAgbVisible: boolean;
+  isChmVisible: boolean;
   pmtilesLayer: TileLayer<XYZ> | null;
   pmtilesZoomRange: PmtilesZoomRange | null;
   vectorLayers: Record<string, VectorLayerState>;
@@ -107,6 +122,7 @@ export function useMapPointerInteractions({
   map,
   isLandcoverVisible,
   isAgbVisible,
+  isChmVisible,
   pmtilesLayer,
   pmtilesZoomRange,
   vectorLayers,
@@ -116,6 +132,7 @@ export function useMapPointerInteractions({
 }: UseMapPointerInteractionsParams) {
   const [hoverPixelInfo, setHoverPixelInfo] = useState<HoverPixelInfo | null>(null);
   const [hoverAgbPixelInfo, setHoverAgbPixelInfo] = useState<HoverAgbPixelInfo | null>(null);
+  const [hoverChmPixelInfo, setHoverChmPixelInfo] = useState<HoverChmPixelInfo | null>(null);
   const [hoveredVectorInfo, setHoveredVectorInfo] = useState<HoveredVectorInfo | null>(null);
   const [selectedVectorInfo, setSelectedVectorInfo] = useState<SelectedVectorInfo | null>(null);
 
@@ -183,7 +200,7 @@ export function useMapPointerInteractions({
         setHoveredVectorInfo(null);
       }
 
-      if (event.dragging || (!isLandcoverVisible && !isAgbVisible) || !pmtilesLayer) {
+      if (event.dragging || (!isLandcoverVisible && !isAgbVisible && !isChmVisible) || !pmtilesLayer) {
         if (hoverUpdateFrameId !== null) {
           window.cancelAnimationFrame(hoverUpdateFrameId);
           hoverUpdateFrameId = null;
@@ -193,6 +210,7 @@ export function useMapPointerInteractions({
 
         setHoverPixelInfo(null);
         setHoverAgbPixelInfo(null);
+        setHoverChmPixelInfo(null);
         return;
       }
 
@@ -230,6 +248,8 @@ export function useMapPointerInteractions({
         const pixelData = pmtilesLayer.getData([nextPixelX, nextPixelY]);
         if (!pixelData || pixelData.byteLength === 0) {
           setHoverPixelInfo(null);
+          setHoverAgbPixelInfo(null);
+          setHoverChmPixelInfo(null);
           return;
         }
 
@@ -284,10 +304,52 @@ export function useMapPointerInteractions({
           });
 
           setHoverPixelInfo(null);
+          setHoverChmPixelInfo(null);
           return;
         }
 
         setHoverAgbPixelInfo(null);
+
+        if (isChmVisible) {
+          if (alpha === 0 || red <= CHM_TRANSPARENT_RAW_THRESHOLD) {
+            setHoverChmPixelInfo(null);
+            return;
+          }
+
+          const rawValue = red;
+          const scaledValue = rawValue / CHM_SCALE_FACTOR;
+          const color = getChmDisplayColor(rawValue);
+
+          setHoverChmPixelInfo((previous) => {
+            if (
+              previous &&
+              previous.rawValue === rawValue &&
+              previous.scaledValue === scaledValue &&
+              previous.color === color &&
+              previous.pixelX === nextPixelX &&
+              previous.pixelY === nextPixelY &&
+              previous.requestedZoom === requestedZoom &&
+              previous.sourceZoom === sourceZoom
+            ) {
+              return previous;
+            }
+
+            return {
+              rawValue,
+              scaledValue,
+              color,
+              pixelX: nextPixelX,
+              pixelY: nextPixelY,
+              requestedZoom,
+              sourceZoom,
+            };
+          });
+
+          setHoverPixelInfo(null);
+          return;
+        }
+
+        setHoverChmPixelInfo(null);
 
         const code =
           alpha === 0
@@ -334,7 +396,7 @@ export function useMapPointerInteractions({
 
       map.un("pointermove", handlePointerMove);
     };
-  }, [isAgbVisible, isLandcoverVisible, map, pmtilesLayer, pmtilesZoomRange, vectorLayers]);
+  }, [isAgbVisible, isChmVisible, isLandcoverVisible, map, pmtilesLayer, pmtilesZoomRange, vectorLayers]);
 
   useEffect(() => {
     if (!map || isDrawingPolygon || hasPendingPolygonConfirm) {
@@ -445,6 +507,7 @@ export function useMapPointerInteractions({
   return {
     hoverPixelInfo,
     hoverAgbPixelInfo,
+    hoverChmPixelInfo,
     hoveredVectorInfo,
     selectedVectorInfo,
     clearHoveredForLayer,

@@ -34,6 +34,7 @@ type UseMapVectorLayersParams = {
   selectedVectorUidRef: MutableRefObject<string | null>;
   isLandcoverVisible: boolean;
   isAgbVisible: boolean;
+  isChmVisible: boolean;
 };
 
 type VectorLayerAddPayload = {
@@ -197,6 +198,7 @@ export function useMapVectorLayers({
   selectedVectorUidRef,
   isLandcoverVisible,
   isAgbVisible,
+  isChmVisible,
 }: UseMapVectorLayersParams) {
   const [vectorLayers, setVectorLayers] = useState<Record<string, VectorLayerState>>({});
   const [communityMapLayerNames, setCommunityMapLayerNames] = useState<string[]>([]);
@@ -407,6 +409,14 @@ export function useMapVectorLayers({
       });
     }
 
+    if (isChmVisible) {
+      layers.push({
+        id: "chm",
+        kind: "chm",
+        title: "Canopy Height Model",
+      });
+    }
+
     for (const [fileName, data] of Object.entries(vectorLayers)) {
       if (!data.isVisible) {
         continue;
@@ -427,7 +437,7 @@ export function useMapVectorLayers({
     }
 
     return layers;
-  }, [isAgbVisible, isLandcoverVisible, vectorLayers]);
+  }, [isAgbVisible, isChmVisible, isLandcoverVisible, vectorLayers]);
 
   return {
     vectorLayers,

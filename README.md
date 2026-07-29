@@ -18,6 +18,7 @@ cp .env.example .env.local
 
 ```bash
 NEXT_PUBLIC_R2_PMTILES_BASE_URL=https://<your-r2-public-url>
+NEXT_PUBLIC_R2_CHM_PMTILES_URL=https://pub-b35b693f4e7a4112af656d6983f8adc2.r2.dev/chm-pmtiles/chm-indonesia.pmtiles
 ```
 
 The app loads yearly archives using this naming convention:
@@ -31,6 +32,9 @@ Example:
 ```txt
 https://pub-b35b693f4e7a4112af656d6983f8adc2.r2.dev/landcover-mapbiomas-pmtiles/1990_landcover.pmtiles
 ```
+
+The CHM layer uses one static PMTiles archive URL and does not animate by year.
+If omitted, it defaults to the public Indonesia CHM archive shown above.
 
 ## Run
 

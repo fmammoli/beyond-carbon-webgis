@@ -16,7 +16,9 @@ import {
   AGB_MAX_YEAR,
   AGB_MIN_YEAR,
   DEFAULT_AGB_OPACITY,
+  DEFAULT_CHM_OPACITY,
   DEFAULT_R2_AGB_PMTILES_BASE_URL,
+  DEFAULT_R2_CHM_PMTILES_URL,
   DEFAULT_LANDCOVER_OPACITY,
   DEFAULT_R2_PMTILES_BASE_URL,
   DEFAULT_YEAR,
@@ -38,6 +40,7 @@ import { ExportsPanel } from "@/components/gis/exports-panel";
 import {
   FloatingStatusMessage,
   HoverAgbTooltip,
+  HoverChmTooltip,
   HoverClassTooltip,
   HoverVectorTooltip,
   MapBottomSlider,
@@ -264,6 +267,8 @@ export default function MapContainer() {
   const [landcoverOpacity, setLandcoverOpacity] = useState(DEFAULT_LANDCOVER_OPACITY);
   const [isAgbVisible, setIsAgbVisible] = useState(false);
   const [agbOpacity, setAgbOpacity] = useState(DEFAULT_AGB_OPACITY);
+  const [isChmVisible, setIsChmVisible] = useState(false);
+  const [chmOpacity, setChmOpacity] = useState(DEFAULT_CHM_OPACITY);
   const [isSatelliteVisible, setIsSatelliteVisible] = useState(true);
   const [isBoundariesAndPlacesVisible, setIsBoundariesAndPlacesVisible] = useState(true);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
@@ -294,10 +299,20 @@ export default function MapContainer() {
     process.env.NEXT_PUBLIC_R2_PMTILES_BASE_URL ?? DEFAULT_R2_PMTILES_BASE_URL;
   const agbPmtilesBaseUrl =
     process.env.NEXT_PUBLIC_R2_AGB_PMTILES_BASE_URL ?? DEFAULT_R2_AGB_PMTILES_BASE_URL;
+  const chmPmtilesUrl =
+    process.env.NEXT_PUBLIC_R2_CHM_PMTILES_URL ?? DEFAULT_R2_CHM_PMTILES_URL;
   const missingPmtilesUrl = !pmtilesBaseUrl;
-  const activeRasterLayer = isLandcoverVisible ? "landcover" : isAgbVisible ? "agb" : null;
-  const activeTimelineMinYear = activeRasterLayer === "agb" ? AGB_MIN_YEAR : MIN_YEAR;
-  const activeTimelineMaxYear = activeRasterLayer === "agb" ? AGB_MAX_YEAR : MAX_YEAR;
+  const activeRasterLayer = isLandcoverVisible
+    ? "landcover"
+    : isAgbVisible
+      ? "agb"
+      : isChmVisible
+        ? "chm"
+        : null;
+  const activeTimelineMinYear =
+    activeRasterLayer === "agb" ? AGB_MIN_YEAR : activeRasterLayer === "chm" ? year : MIN_YEAR;
+  const activeTimelineMaxYear =
+    activeRasterLayer === "agb" ? AGB_MAX_YEAR : activeRasterLayer === "chm" ? year : MAX_YEAR;
   const landcoverArchiveOptions = useMemo<PmtilesArchiveOptions>(() => ({
     minYear: MIN_YEAR,
     maxYear: MAX_YEAR,
@@ -307,13 +322,27 @@ export default function MapContainer() {
     maxYear: AGB_MAX_YEAR,
     fileSuffix: AGB_FILE_SUFFIX,
   }), []);
-  const activePmtilesBaseUrl = activeRasterLayer === "agb" ? agbPmtilesBaseUrl : pmtilesBaseUrl;
-  const activeArchiveOptions = activeRasterLayer === "agb" ? agbArchiveOptions : landcoverArchiveOptions;
+  const chmArchiveOptions = useMemo<PmtilesArchiveOptions>(() => ({
+    staticArchiveUrl: chmPmtilesUrl,
+  }), [chmPmtilesUrl]);
+  const activePmtilesBaseUrl =
+    activeRasterLayer === "agb"
+      ? agbPmtilesBaseUrl
+      : activeRasterLayer === "chm"
+        ? chmPmtilesUrl
+        : pmtilesBaseUrl;
+  const activeArchiveOptions =
+    activeRasterLayer === "agb"
+      ? agbArchiveOptions
+      : activeRasterLayer === "chm"
+        ? chmArchiveOptions
+        : landcoverArchiveOptions;
 
   const onLandcoverVisibilityChange = useCallback((visible: boolean) => {
     setIsLandcoverVisible(visible);
     if (visible) {
       setIsAgbVisible(false);
+      setIsChmVisible(false);
       setYear((previousYear) => Math.max(MIN_YEAR, Math.min(MAX_YEAR, previousYear)));
       return;
     }
@@ -325,8 +354,19 @@ export default function MapContainer() {
     setIsAgbVisible(visible);
     if (visible) {
       setIsLandcoverVisible(false);
+      setIsChmVisible(false);
       setYear((previousYear) => Math.max(AGB_MIN_YEAR, Math.min(AGB_MAX_YEAR, previousYear)));
       return;
+    }
+
+    setIsPlaying(false);
+  }, []);
+
+  const onChmVisibilityChange = useCallback((visible: boolean) => {
+    setIsChmVisible(visible);
+    if (visible) {
+      setIsLandcoverVisible(false);
+      setIsAgbVisible(false);
     }
 
     setIsPlaying(false);
@@ -380,6 +420,7 @@ export default function MapContainer() {
     selectedVectorUidRef,
     isLandcoverVisible,
     isAgbVisible,
+    isChmVisible,
   });
 
   const {
@@ -431,6 +472,7 @@ export default function MapContainer() {
 
   const landcoverRenderMode = "classified" as const;
   const agbRenderMode = "ylgn" as const;
+  const chmRenderMode = "chm" as const;
   const pmtilesZoomRangeKey =
     activeRasterLayer && activePmtilesBaseUrl
       ? `${activeRasterLayer}:${activePmtilesBaseUrl}:${year}`
@@ -443,6 +485,7 @@ export default function MapContainer() {
   const {
     hoverPixelInfo,
     hoverAgbPixelInfo,
+    hoverChmPixelInfo,
     hoveredVectorInfo,
     selectedVectorInfo,
     clearHoveredForLayer,
@@ -451,6 +494,7 @@ export default function MapContainer() {
     map: mapContext.map,
     isLandcoverVisible,
     isAgbVisible,
+    isChmVisible,
     pmtilesLayer,
     pmtilesZoomRange,
     vectorLayers,
@@ -589,7 +633,13 @@ export default function MapContainer() {
   }, [activeArchiveOptions, activePmtilesBaseUrl, pmtilesZoomRangeKey, year]);
 
   useEffect(() => {
-    if (!isPlaying || !activeRasterLayer || !activePmtilesBaseUrl || !mapContext.map) {
+    if (
+      !isPlaying ||
+      !activeRasterLayer ||
+      activeRasterLayer === "chm" ||
+      !activePmtilesBaseUrl ||
+      !mapContext.map
+    ) {
       return;
     }
 
@@ -788,15 +838,15 @@ export default function MapContainer() {
   }, [landcoverStatsJob]);
 
   const hoverTooltipStyle =
-    (hoverPixelInfo || hoverAgbPixelInfo) && mapContext.map
+    (hoverPixelInfo || hoverAgbPixelInfo || hoverChmPixelInfo) && mapContext.map
       ? (() => {
           const mapSize = mapContext.map.getSize();
           const tooltipWidth = 192;
           const tooltipHeight = 44;
           const offsetX = 16;
           const offsetY = 30;
-          const hoverX = hoverPixelInfo?.pixelX ?? hoverAgbPixelInfo?.pixelX ?? 0;
-          const hoverY = hoverPixelInfo?.pixelY ?? hoverAgbPixelInfo?.pixelY ?? 0;
+          const hoverX = hoverPixelInfo?.pixelX ?? hoverAgbPixelInfo?.pixelX ?? hoverChmPixelInfo?.pixelX ?? 0;
+          const hoverY = hoverPixelInfo?.pixelY ?? hoverAgbPixelInfo?.pixelY ?? hoverChmPixelInfo?.pixelY ?? 0;
           const left = mapSize
             ? Math.min(hoverX + offsetX, Math.max(12, mapSize[0] - tooltipWidth - 12))
             : hoverX + offsetX;
@@ -872,6 +922,22 @@ export default function MapContainer() {
         />
       ) : null}
 
+      {isChmVisible ? (
+        <PmtilesLayer
+          map={mapContext.map}
+          year={year}
+          visible
+          opacity={chmOpacity}
+          renderMode={chmRenderMode}
+          baseUrl={chmPmtilesUrl}
+          archiveOptions={chmArchiveOptions}
+          prefetchNeighbors={!isThreatMapGenerating}
+          onLayerReady={setPmtilesLayer}
+          onFrameLoadingChange={setIsFrameLoading}
+          onYearFrameReady={onThreatMapYearFrameReady}
+        />
+      ) : null}
+
       <VectorDropzone
         ref={vectorDropzoneRef}
         map={mapContext.map}
@@ -888,6 +954,8 @@ export default function MapContainer() {
             landcoverOpacity={landcoverOpacity}
             isAgbVisible={isAgbVisible}
             agbOpacity={agbOpacity}
+            isChmVisible={isChmVisible}
+            chmOpacity={chmOpacity}
             activeLegendLayers={activeLegendLayers}
             isLegendOpen={isLegendOpen}
             onSatelliteChange={setIsSatelliteVisible}
@@ -896,6 +964,8 @@ export default function MapContainer() {
             onLandcoverOpacityChange={setLandcoverOpacity}
             onAgbChange={onAgbVisibilityChange}
             onAgbOpacityChange={setAgbOpacity}
+            onChmChange={onChmVisibilityChange}
+            onChmOpacityChange={setChmOpacity}
             onLegendOpenChange={setIsLegendOpen}
             selectedPolygonInfo={selectedPolygonPanelInfo}
             canDownloadSelectedPolygon={Boolean(selectedPolygonInfo?.geometry)}
@@ -1012,6 +1082,21 @@ export default function MapContainer() {
           )}
         />
 
+        <HoverChmTooltip
+          rawValue={hoverChmPixelInfo?.rawValue ?? 0}
+          scaledValue={hoverChmPixelInfo?.scaledValue ?? 0}
+          color={hoverChmPixelInfo?.color ?? "#1e782d"}
+          hoverTooltipStyle={hoverTooltipStyle}
+          isVisible={Boolean(
+            isChmVisible &&
+              hoverChmPixelInfo &&
+              hoverTooltipStyle &&
+              hoverChmPixelInfo.rawValue > 0 &&
+              !hoveredVectorInfo &&
+              !isHoveringOverlayPanel,
+          )}
+        />
+
         <PolygonConfirmDialog
           open={Boolean(pendingPolygonConfirm)}
           metrics={pendingPolygonConfirm?.metrics ?? null}
@@ -1026,7 +1111,7 @@ export default function MapContainer() {
           }}
         />
 
-        {activeRasterLayer && !isThreatMapAiming && !isThreatMapGenerating ? (
+        {activeRasterLayer && activeRasterLayer !== "chm" && !isThreatMapAiming && !isThreatMapGenerating ? (
           <OverlayHoverBoundary onHoverChange={setIsHoveringOverlayPanel}>
             <MapBottomSlider
               year={year}

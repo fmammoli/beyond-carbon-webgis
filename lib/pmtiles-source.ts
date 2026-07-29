@@ -14,9 +14,13 @@ import {
   AGB_TRANSPARENT_RAW_THRESHOLD,
   getAgbDisplayColor,
 } from "@/lib/agb-legend";
+import {
+  CHM_TRANSPARENT_RAW_THRESHOLD,
+  getChmDisplayColor,
+} from "@/lib/chm-legend";
 import { MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP } from "@/lib/mapbiomas-colors";
 
-export type PmtilesRenderMode = "classified" | "raw-codes" | "ylgn";
+export type PmtilesRenderMode = "classified" | "raw-codes" | "ylgn" | "chm";
 
 export type PmtilesArchiveOptions = {
   filePrefix?: string;
@@ -24,6 +28,7 @@ export type PmtilesArchiveOptions = {
   minYear?: number;
   maxYear?: number;
   flipY?: boolean;
+  staticArchiveUrl?: string;
 };
 
 // Guaranteed transparent 1x1 GIF used when a PMTiles tile is missing/out-of-range.
@@ -59,6 +64,7 @@ const DEFAULT_PMTILES_ARCHIVE_OPTIONS: Required<PmtilesArchiveOptions> = {
   minYear: MIN_YEAR,
   maxYear: MAX_YEAR,
   flipY: LANDCOVER_FLIP_Y,
+  staticArchiveUrl: "",
 };
 
 export type PmtilesTileRequest = {
@@ -101,8 +107,17 @@ function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/$/, "");
 }
 
+function normalizeStaticArchiveUrl(url: string | undefined): string {
+  return (url ?? "").trim().replace(/\/$/, "");
+}
+
 function getArchiveUrl(baseUrl: string, year: number, options?: PmtilesArchiveOptions): string {
-  const { filePrefix, fileSuffix } = resolveArchiveOptions(options);
+  const { filePrefix, fileSuffix, staticArchiveUrl } = resolveArchiveOptions(options);
+  const normalizedStaticArchiveUrl = normalizeStaticArchiveUrl(staticArchiveUrl);
+  if (normalizedStaticArchiveUrl) {
+    return normalizedStaticArchiveUrl;
+  }
+
   const normalized = normalizeBaseUrl(baseUrl);
   return `${normalized}/${filePrefix}${clampYear(year, options)}${fileSuffix}`;
 }
@@ -383,17 +398,20 @@ async function createStyledTileObjectUrl(
       continue;
     }
 
-    if (renderMode === "ylgn") {
+    if (renderMode === "ylgn" || renderMode === "chm") {
       const sourceValue = canDecodeClasses
         ? red
         : Math.round((red + green + blue) / 3);
 
-      if (sourceValue <= AGB_TRANSPARENT_RAW_THRESHOLD) {
+      const transparentThreshold =
+        renderMode === "chm" ? CHM_TRANSPARENT_RAW_THRESHOLD : AGB_TRANSPARENT_RAW_THRESHOLD;
+      if (sourceValue <= transparentThreshold) {
         pixels[index + 3] = 0;
         continue;
       }
 
-      const displayColor = getAgbDisplayColor(sourceValue);
+      const displayColor =
+        renderMode === "chm" ? getChmDisplayColor(sourceValue) : getAgbDisplayColor(sourceValue);
       const parsedColor = displayColor.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
 
       if (parsedColor) {
@@ -571,7 +589,8 @@ export function prefetchAdjacentPmtiles(
   const prevYear = clampYear(year - 1, options);
   const nextYear = clampYear(year + 1, options);
 
-  [prevYear, nextYear].forEach(async (candidateYear) => {
+  const candidateYears = Array.from(new Set([prevYear, nextYear]));
+  candidateYears.forEach(async (candidateYear) => {
     try {
       const archive = getArchive(baseUrl, candidateYear, options);
       await archive.getHeader();
@@ -598,11 +617,14 @@ export function prefetchAllPmtilesYears(
     { length: resolvedArchiveOptions.maxYear - resolvedArchiveOptions.minYear + 1 },
     (_, index) => resolvedArchiveOptions.minYear + index,
   );
+  const dedupedYears = Array.from(
+    new Map(years.map((year) => [getArchiveUrl(normalizedBaseUrl, year, options), year])).values(),
+  );
   const maxConcurrency = 4;
 
   const prefetchPromise = (async () => {
-    for (let index = 0; index < years.length; index += maxConcurrency) {
-      const batch = years.slice(index, index + maxConcurrency);
+    for (let index = 0; index < dedupedYears.length; index += maxConcurrency) {
+      const batch = dedupedYears.slice(index, index + maxConcurrency);
 
       await Promise.all(
         batch.map(async (candidateYear) => {
@@ -627,11 +649,12 @@ async function prefetchSinglePmtilesTile(
   options?: PmtilesArchiveOptions,
 ): Promise<void> {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+  const archiveUrl = getArchiveUrl(normalizedBaseUrl, year, options);
   const z = Math.max(0, Math.round(tileRequest.z));
   const x = Math.max(0, Math.round(tileRequest.x));
   const y = Math.max(0, Math.round(tileRequest.y));
   const resolvedArchiveOptions = resolveArchiveOptions(options);
-  const requestKey = `${normalizedBaseUrl}:${resolvedArchiveOptions.filePrefix}:${resolvedArchiveOptions.fileSuffix}:${resolvedArchiveOptions.minYear}:${resolvedArchiveOptions.maxYear}:${resolvedArchiveOptions.flipY}:${year}:${z}:${x}:${y}`;
+  const requestKey = `${normalizedBaseUrl}:${resolvedArchiveOptions.filePrefix}:${resolvedArchiveOptions.fileSuffix}:${resolvedArchiveOptions.minYear}:${resolvedArchiveOptions.maxYear}:${resolvedArchiveOptions.flipY}:${archiveUrl}:${z}:${x}:${y}`;
   const cachedPromise = tilePrefetchPromiseCache.get(requestKey);
 
   if (cachedPromise) {
@@ -674,7 +697,11 @@ export async function prefetchViewportPmtilesYears(
   }
 
   const uniqueYears = Array.from(
-    new Set(years.map((year) => clampYear(year, options?.archive))),
+    new Map(
+      years
+        .map((year) => clampYear(year, options?.archive))
+        .map((year) => [getArchiveUrl(baseUrl, year, options?.archive), year]),
+    ).values(),
   );
   const uniqueTileRequests = Array.from(
     new Map(tileRequests.map((tile) => [`${tile.z}:${tile.x}:${tile.y}`, tile])).values(),

@@ -40,6 +40,8 @@ type MapTopPanelsProps = {
   landcoverOpacity: number;
   isAgbVisible: boolean;
   agbOpacity: number;
+  isChmVisible: boolean;
+  chmOpacity: number;
   activeLegendLayers: ActiveLegendLayer[];
   isLegendOpen: boolean;
   onSatelliteChange: (visible: boolean) => void;
@@ -48,6 +50,8 @@ type MapTopPanelsProps = {
   onLandcoverOpacityChange: (opacity: number) => void;
   onAgbChange: (visible: boolean) => void;
   onAgbOpacityChange: (opacity: number) => void;
+  onChmChange: (visible: boolean) => void;
+  onChmOpacityChange: (opacity: number) => void;
   onLegendOpenChange: (open: boolean) => void;
   selectedPolygonInfo: SelectedPolygonInfo | null;
   canDownloadSelectedPolygon: boolean;
@@ -87,6 +91,14 @@ type HoverClassTooltipProps = {
 };
 
 type HoverAgbTooltipProps = {
+  rawValue: number;
+  scaledValue: number;
+  color: string;
+  hoverTooltipStyle: CSSProperties | null;
+  isVisible: boolean;
+};
+
+type HoverChmTooltipProps = {
   rawValue: number;
   scaledValue: number;
   color: string;
@@ -165,6 +177,8 @@ export function MapTopPanels({
   landcoverOpacity,
   isAgbVisible,
   agbOpacity,
+  isChmVisible,
+  chmOpacity,
   activeLegendLayers,
   isLegendOpen,
   onSatelliteChange,
@@ -173,6 +187,8 @@ export function MapTopPanels({
   onLandcoverOpacityChange,
   onAgbChange,
   onAgbOpacityChange,
+  onChmChange,
+  onChmOpacityChange,
   onLegendOpenChange,
   selectedPolygonInfo,
   canDownloadSelectedPolygon,
@@ -225,12 +241,16 @@ export function MapTopPanels({
                       landcoverOpacity={landcoverOpacity}
                       isAgbVisible={isAgbVisible}
                       agbOpacity={agbOpacity}
+                      isChmVisible={isChmVisible}
+                      chmOpacity={chmOpacity}
                       onSatelliteChange={onSatelliteChange}
                       onBoundariesAndPlacesChange={onBoundariesAndPlacesChange}
                       onLandcoverChange={onLandcoverChange}
                       onLandcoverOpacityChange={onLandcoverOpacityChange}
                       onAgbChange={onAgbChange}
                       onAgbOpacityChange={onAgbOpacityChange}
+                      onChmChange={onChmChange}
+                      onChmOpacityChange={onChmOpacityChange}
                       embedded
                     />
                   </CardContent>
@@ -263,12 +283,16 @@ export function MapTopPanels({
                   landcoverOpacity={landcoverOpacity}
                   isAgbVisible={isAgbVisible}
                   agbOpacity={agbOpacity}
+                  isChmVisible={isChmVisible}
+                  chmOpacity={chmOpacity}
                   onSatelliteChange={onSatelliteChange}
                   onBoundariesAndPlacesChange={onBoundariesAndPlacesChange}
                   onLandcoverChange={onLandcoverChange}
                   onLandcoverOpacityChange={onLandcoverOpacityChange}
                   onAgbChange={onAgbChange}
                   onAgbOpacityChange={onAgbOpacityChange}
+                  onChmChange={onChmChange}
+                  onChmOpacityChange={onChmOpacityChange}
                   embedded
                 />
               </CardContent>
@@ -734,6 +758,37 @@ export function HoverAgbTooltip({
         <div className="min-w-0 leading-tight">
           <div className="truncate">agb</div>
           <div className="truncate text-white/75">{scaledValue.toFixed(1)} Mg/ha</div>
+        </div>
+      </div>
+      <div className="mt-1 text-white/80">Raw pixel: {rawValue}</div>
+    </div>
+  );
+}
+
+export function HoverChmTooltip({
+  rawValue,
+  scaledValue,
+  color,
+  hoverTooltipStyle,
+  isVisible,
+}: HoverChmTooltipProps) {
+  if (!isVisible || !hoverTooltipStyle) {
+    return null;
+  }
+
+  return (
+    <div
+      className="pointer-events-none absolute z-40 max-w-56 rounded-md border border-white/35 bg-black/75 px-2.5 py-1.5 text-[11px] text-white shadow-lg backdrop-blur-sm duration-100 ease-out animate-in fade-in-0 zoom-in-95 slide-in-from-left-1 transition-[left,top]"
+      style={hoverTooltipStyle}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className="h-3 w-3 shrink-0 rounded-xs ring-1 ring-white/60"
+          style={{ backgroundColor: color }}
+        />
+        <div className="min-w-0 leading-tight">
+          <div className="truncate">canopy height model</div>
+          <div className="truncate text-white/75">{scaledValue.toFixed(1)} m</div>
         </div>
       </div>
       <div className="mt-1 text-white/80">Raw pixel: {rawValue}</div>

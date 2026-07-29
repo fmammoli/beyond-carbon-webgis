@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { ChevronDown, ListTree } from "lucide-react";
 
 import { agbLegend } from "@/lib/agb-legend";
+import { chmLegend } from "@/lib/chm-legend";
 import { MAPBIOMAS_CLASSES } from "@/lib/mapbiomas-colors";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +23,11 @@ type ActiveLegendLayer =
   | {
       id: string;
       kind: "agb";
+      title: string;
+    }
+  | {
+      id: string;
+      kind: "chm";
       title: string;
     }
   | {
@@ -190,6 +196,30 @@ function AgbLegendPanel() {
   );
 }
 
+function ChmLegendPanel() {
+  const gradientStops = chmLegend.colors.join(", ");
+
+  return (
+    <div className="rounded-md border border-slate-200/80 bg-white p-2.5">
+      <div className="mb-2 text-sm font-medium tracking-tight text-slate-900">
+        Canopy Height Model (m)
+      </div>
+      <div
+        className="h-10 rounded-sm border border-slate-200/80"
+        style={{ background: `linear-gradient(to right, ${gradientStops})` }}
+      />
+      <div className="mt-2 flex items-start justify-between gap-1 px-0.5 text-[10px] leading-none text-slate-700">
+        <span>0</span>
+        <span>1</span>
+        <span>15</span>
+        <span>30</span>
+        <span>45</span>
+        <span>&gt; 60</span>
+      </div>
+    </div>
+  );
+}
+
 function VectorLegendPanel({
   title,
   fillOpacity,
@@ -289,6 +319,10 @@ export function Legend({ open, onOpenChange, activeLayers }: LegendProps) {
 
                 if (layer.kind === "agb") {
                   return <AgbLegendPanel key={layer.id} />;
+                }
+
+                if (layer.kind === "chm") {
+                  return <ChmLegendPanel key={layer.id} />;
                 }
 
                 if (layer.kind === "vector") {
