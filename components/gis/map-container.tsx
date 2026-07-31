@@ -908,7 +908,6 @@ export default function MapContainer() {
                 workshopFeatures.map((feature) => feature.getProperties() as Record<string, unknown>),
               ),
             },
-            { fitToExtent: false },
           );
 
           loadedLayerCount += 1;
