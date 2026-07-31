@@ -7,20 +7,15 @@ import {
   LANDCOVER_FILE_PREFIX,
   LANDCOVER_FILE_SUFFIX,
   LANDCOVER_MAX_OVERZOOM_DELTA,
+  CHM_MAX_OVERZOOM_DELTA,
   MAX_YEAR,
   MIN_YEAR,
 } from "@/lib/gis-constants";
 import {
-  AGB_TRANSPARENT_RAW_THRESHOLD,
-  getAgbDisplayColor,
-} from "@/lib/agb-legend";
-import {
-  CHM_TRANSPARENT_RAW_THRESHOLD,
-  getChmDisplayColor,
+  getChmDisplayRgb,
 } from "@/lib/chm-legend";
-import { MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP } from "@/lib/mapbiomas-colors";
 
-export type PmtilesRenderMode = "classified" | "raw-codes" | "ylgn" | "chm";
+export type PmtilesRenderMode = "passthrough" | "raw-codes" | "chm";
 
 export type PmtilesArchiveOptions = {
   filePrefix?: string;
@@ -38,15 +33,6 @@ const BLACK_TRANSPARENCY_THRESHOLD = 8;
 const WHITE_TRANSPARENCY_THRESHOLD = 240;
 const BRIGHT_BACKGROUND_MIN_CHANNEL = 220;
 const BRIGHT_BACKGROUND_MAX_CHROMA_DELTA = 24;
-const TRANSPARENT_CLASS_IDS = new Set([0, 27, 255]);
-const SORTED_CLASS_IDS = Object.keys(MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP)
-  .map((value) => Number(value))
-  .sort((a, b) => a - b);
-const MIN_CLASS_ID = SORTED_CLASS_IDS[0] ?? 0;
-const MAX_CLASS_ID = SORTED_CLASS_IDS[SORTED_CLASS_IDS.length - 1] ?? 0;
-const KNOWN_CLASS_IDS = new Set(
-  Object.keys(MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP).map((value) => Number(value)),
-);
 
 const archiveCache = new Map<string, PMTiles>();
 export type PmtilesZoomRange = {
@@ -133,31 +119,6 @@ function getArchive(baseUrl: string, year: number, options?: PmtilesArchiveOptio
   const created = new PMTiles(archiveUrl);
   archiveCache.set(archiveUrl, created);
   return created;
-}
-
-function getNearestKnownClassId(value: number): number | null {
-  if (KNOWN_CLASS_IDS.has(value)) {
-    return value;
-  }
-
-  if (SORTED_CLASS_IDS.length === 0) {
-    return null;
-  }
-
-  let nearest = SORTED_CLASS_IDS[0];
-  let bestDistance = Math.abs(value - nearest);
-
-  for (let index = 1; index < SORTED_CLASS_IDS.length; index += 1) {
-    const candidate = SORTED_CLASS_IDS[index];
-    const distance = Math.abs(value - candidate);
-
-    if (distance < bestDistance) {
-      nearest = candidate;
-      bestDistance = distance;
-    }
-  }
-
-  return nearest;
 }
 
 function isBrightLowSaturationBackground(red: number, green: number, blue: number): boolean {
@@ -316,14 +277,57 @@ async function createStyledTileObjectUrl(
 
   bitmap.close();
 
+  if (renderMode === "passthrough") {
+    const passthroughBlob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((result) => {
+        if (result) {
+          resolve(result);
+          return;
+        }
+
+        reject(new Error("Failed to encode passthrough tile"));
+      }, "image/png");
+    });
+
+    return URL.createObjectURL(passthroughBlob);
+  }
+
+  if (renderMode === "chm") {
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = imageData.data;
+
+    for (let index = 0; index < pixels.length; index += 4) {
+      const red = pixels[index];
+      const [mappedRed, mappedGreen, mappedBlue] = getChmDisplayRgb(red);
+      pixels[index] = mappedRed;
+      pixels[index + 1] = mappedGreen;
+      pixels[index + 2] = mappedBlue;
+      pixels[index + 3] = 255;
+    }
+
+    context.putImageData(imageData, 0, 0);
+
+    const transparentBlob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((result) => {
+        if (result) {
+          resolve(result);
+          return;
+        }
+
+        reject(new Error("Failed to encode transparent tile"));
+      }, "image/png");
+    });
+
+    return URL.createObjectURL(transparentBlob);
+  }
+
   const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
   const pixels = imageData.data;
   let opaquePixelCount = 0;
   let grayscalePixelCount = 0;
   let redChannelCarrierPixelCount = 0;
-  let redChannelClassPixelCount = 0;
 
-  // Detect single-band class rasters (R=G=B) before applying a class palette.
+  // Detect single-band rasters for optional red-channel decoding.
   for (let index = 0; index < pixels.length; index += 4) {
     const alpha = pixels[index + 3];
     if (alpha === 0) {
@@ -339,16 +343,11 @@ async function createStyledTileObjectUrl(
       grayscalePixelCount += 1;
     }
 
-    const hasKnownClassRed = KNOWN_CLASS_IDS.has(red);
     const hasClassCarrierGreen = Math.abs(green - 127) <= 1 || green <= 1 || green >= 254;
     const hasClassCarrierBlue = blue <= 1;
 
     if (hasClassCarrierGreen && hasClassCarrierBlue) {
       redChannelCarrierPixelCount += 1;
-    }
-
-    if (hasKnownClassRed && hasClassCarrierGreen && hasClassCarrierBlue) {
-      redChannelClassPixelCount += 1;
     }
   }
 
@@ -356,10 +355,8 @@ async function createStyledTileObjectUrl(
     opaquePixelCount > 0 && grayscalePixelCount / opaquePixelCount >= 0.98;
   const hasRedChannelCarrierPattern =
     opaquePixelCount > 0 && redChannelCarrierPixelCount / opaquePixelCount >= 0.6;
-  const isRedChannelClassRaster =
-    opaquePixelCount > 0 && redChannelClassPixelCount / opaquePixelCount >= 0.2;
   const canDecodeClasses =
-    isSingleBandClassRaster || hasRedChannelCarrierPattern || isRedChannelClassRaster;
+    isSingleBandClassRaster || hasRedChannelCarrierPattern;
 
   for (let index = 0; index < pixels.length; index += 4) {
     const red = pixels[index];
@@ -398,31 +395,6 @@ async function createStyledTileObjectUrl(
       continue;
     }
 
-    if (renderMode === "ylgn" || renderMode === "chm") {
-      const sourceValue = canDecodeClasses
-        ? red
-        : Math.round((red + green + blue) / 3);
-
-      const transparentThreshold =
-        renderMode === "chm" ? CHM_TRANSPARENT_RAW_THRESHOLD : AGB_TRANSPARENT_RAW_THRESHOLD;
-      if (sourceValue <= transparentThreshold) {
-        pixels[index + 3] = 0;
-        continue;
-      }
-
-      const displayColor =
-        renderMode === "chm" ? getChmDisplayColor(sourceValue) : getAgbDisplayColor(sourceValue);
-      const parsedColor = displayColor.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
-
-      if (parsedColor) {
-        pixels[index] = Number(parsedColor[1]);
-        pixels[index + 1] = Number(parsedColor[2]);
-        pixels[index + 2] = Number(parsedColor[3]);
-      }
-      pixels[index + 3] = 255;
-      continue;
-    }
-
     if (canDecodeClasses && renderMode === "raw-codes") {
       // Preserve encoded class values directly as grayscale for QA.
       pixels[index] = red;
@@ -430,29 +402,6 @@ async function createStyledTileObjectUrl(
       pixels[index + 2] = red;
       pixels[index + 3] = 255;
       continue;
-    }
-
-    if (canDecodeClasses) {
-      if (TRANSPARENT_CLASS_IDS.has(red)) {
-        pixels[index + 3] = 0;
-        continue;
-      }
-
-      if (red < MIN_CLASS_ID || red > MAX_CLASS_ID) {
-        // Avoid painting carrier/no-data values (e.g. 0,127,0) as valid classes.
-        pixels[index + 3] = 0;
-        continue;
-      }
-
-      const nearestClassId = getNearestKnownClassId(red);
-      const mappedColor =
-        nearestClassId !== null ? MAPBIOMAS_CLASS_COLOR_RGB_LOOKUP[nearestClassId] : undefined;
-
-      if (mappedColor) {
-        pixels[index] = mappedColor[0];
-        pixels[index + 1] = mappedColor[1];
-        pixels[index + 2] = mappedColor[2];
-      }
     }
   }
 
@@ -477,7 +426,7 @@ let tileRequestSequence = 0;
 export function createPmtilesXyzSource(
   baseUrl: string,
   year: number,
-  renderMode: PmtilesRenderMode = "classified",
+  renderMode: PmtilesRenderMode = "passthrough",
   options?: PmtilesArchiveOptions,
 ): XYZ {
   const sourceYear = clampYear(year, options);
@@ -515,7 +464,10 @@ export function createPmtilesXyzSource(
         const archive = getArchive(baseUrl, parsed.year, options);
         const zoomRange = await getArchiveHeader(baseUrl, parsed.year, options);
 
-        if (zoomRange && parsed.z > zoomRange.maxZoom + LANDCOVER_MAX_OVERZOOM_DELTA) {
+        const maxOverzoomDelta =
+          renderMode === "chm" ? CHM_MAX_OVERZOOM_DELTA : LANDCOVER_MAX_OVERZOOM_DELTA;
+
+        if (zoomRange && parsed.z > zoomRange.maxZoom + maxOverzoomDelta) {
           image.src = EMPTY_TILE_DATA_URI;
           return;
         }
@@ -559,13 +511,25 @@ export function createPmtilesXyzSource(
           overzoomDelta > 0 ? ((parsed.x % overzoomScale) + overzoomScale) % overzoomScale : 0;
         const overzoomOffsetY =
           overzoomDelta > 0 ? ((parsed.y % overzoomScale) + overzoomScale) % overzoomScale : 0;
+        const needsProcessing = renderMode !== "passthrough" || overzoomScale > 1;
+
+        if (!needsProcessing) {
+          image.onload = () => URL.revokeObjectURL(fallbackObjectUrl);
+          image.onerror = () => URL.revokeObjectURL(fallbackObjectUrl);
+          image.src = fallbackObjectUrl;
+          return;
+        }
 
         try {
-          objectUrl = await createStyledTileObjectUrl(blob, renderMode, {
-            scale: overzoomScale,
-            offsetX: overzoomOffsetX,
-            offsetY: overzoomOffsetY,
-          });
+          objectUrl = await createStyledTileObjectUrl(
+            blob,
+            renderMode,
+            {
+              scale: overzoomScale,
+              offsetX: overzoomOffsetX,
+              offsetY: overzoomOffsetY,
+            },
+          );
           URL.revokeObjectURL(fallbackObjectUrl);
         } catch {
           // If image processing fails, fall back to the original tile payload.

@@ -114,4 +114,63 @@ describe("threat-map client", () => {
     expect(downloaded.filename).toBe("threat_map_tm-1.zip");
     expect(downloaded.blob.size).toBeGreaterThan(0);
   });
+
+  it("sends overlay layers in the create request payload", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      jobId: "tm-5",
+      status: "queued",
+      message: "queued",
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createThreatMapJob({
+      geojson: FEATURE_COLLECTION,
+      geojsonCrs: "EPSG:3857",
+      overlayLayers: [
+        {
+          id: "wood-fiber",
+          label: "Wood Fiber Concession",
+          geojsonCrs: "EPSG:3857",
+          geojson: FEATURE_COLLECTION,
+          style: {
+            strokeColor: "#f59e0b",
+            strokeWidth: 2,
+            fillColor: "#f59e0b",
+            fillOpacity: 0.15,
+          },
+          showInLegend: true,
+          legendOrder: 10,
+        },
+      ],
+      preset: "balanced",
+      outputFormat: "frames_tar_gz",
+    }, {
+      baseUrl: "http://127.0.0.1:8000",
+      apiKey: "test-key",
+    });
+
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const requestBody = JSON.parse(String(requestInit.body)) as Record<string, unknown>;
+
+    expect(requestBody.geojsonCrs).toBe("EPSG:3857");
+    expect(requestBody.overlayLayers).toEqual([
+      {
+        id: "wood-fiber",
+        label: "Wood Fiber Concession",
+        geojsonCrs: "EPSG:3857",
+        geojson: FEATURE_COLLECTION,
+        style: {
+          strokeColor: "#f59e0b",
+          strokeWidth: 2,
+          fillColor: "#f59e0b",
+          fillOpacity: 0.15,
+        },
+        showInLegend: true,
+        legendOrder: 10,
+      },
+    ]);
+    expect(requestBody).not.toHaveProperty("geojson_crs");
+    expect(requestBody).not.toHaveProperty("overlay_layers");
+  });
 });

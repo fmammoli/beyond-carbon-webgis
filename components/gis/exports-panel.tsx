@@ -1,6 +1,6 @@
 "use client";
 
-import { Clapperboard } from "lucide-react";
+import { Camera, Clapperboard } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type {
@@ -9,6 +9,11 @@ import type {
 } from "@/components/gis/threat-map-overlay";
 
 type ExportsPanelProps = {
+  onCaptureMapClick: () => void;
+  onCancelCaptureMapAiming: () => void;
+  isCapturingMap: boolean;
+  isCaptureMapAiming: boolean;
+  captureMapError: string | null;
   onThreatMapClick: () => void;
   onCancelThreatMapGeneration: () => void;
   isThreatMapAiming: boolean;
@@ -20,6 +25,11 @@ type ExportsPanelProps = {
 };
 
 export function ExportsPanel({
+  onCaptureMapClick,
+  onCancelCaptureMapAiming,
+  isCapturingMap,
+  isCaptureMapAiming,
+  captureMapError,
   onThreatMapClick,
   onCancelThreatMapGeneration,
   isThreatMapAiming,
@@ -29,10 +39,49 @@ export function ExportsPanel({
   threatMapError,
   disabled = false,
 }: ExportsPanelProps) {
-  const isThreatMapButtonDisabled = disabled || isThreatMapGenerating;
+  const isThreatMapButtonDisabled = disabled || isThreatMapGenerating || isCapturingMap;
+  const isCaptureMapButtonDisabled =
+    disabled || isCapturingMap || isThreatMapGenerating || isThreatMapAiming || isCaptureMapAiming;
 
   return (
     <div className="space-y-2.5">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="w-full justify-start"
+        disabled={isCaptureMapButtonDisabled}
+        onClick={onCaptureMapClick}
+      >
+        <Camera className="size-4" aria-hidden />
+        {isCapturingMap ? "Capture map (Generating...)" : "Capture map"}
+      </Button>
+      {isCaptureMapAiming ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="w-full justify-start border-rose-300 text-rose-700 hover:bg-rose-50"
+          onClick={onCancelCaptureMapAiming}
+        >
+          Cancel capture aiming
+        </Button>
+      ) : null}
+      {isCapturingMap ? (
+        <div className="rounded-md border border-cyan-200 bg-cyan-50/70 px-3 py-2 text-xs text-cyan-900">
+          Creating focused PNG map with current visible-layer legend...
+        </div>
+      ) : null}
+      {isCaptureMapAiming ? (
+        <div className="rounded-md border border-cyan-200 bg-cyan-50/70 px-3 py-2 text-xs text-cyan-900">
+          Capture aiming active. Position the square and click Generate from the map overlay.
+        </div>
+      ) : null}
+      {captureMapError ? (
+        <div className="rounded-md border border-rose-200 bg-rose-50/90 px-3 py-2 text-xs text-rose-900">
+          {captureMapError}
+        </div>
+      ) : null}
       <Button
         type="button"
         size="sm"
@@ -91,6 +140,9 @@ export function ExportsPanel({
           {threatMapError}
         </div>
       ) : null}
+      <p className="text-xs text-slate-700/90">
+        Click Capture map, aim square, then click Generate for PNG download.
+      </p>
       <p className="text-xs text-slate-700/90">
         Click Threat Map, aim the square on map, then click Generate.
       </p>

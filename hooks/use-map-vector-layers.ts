@@ -6,7 +6,7 @@ import type OlGeometry from "ol/geom/Geometry";
 import VectorLayer from "ol/layer/Vector";
 import type OLMap from "ol/Map";
 import VectorSource from "ol/source/Vector";
-import { Circle as CircleStyle, Fill, Stroke, Style } from "ol/style";
+import { Circle as CircleStyle, Fill, Stroke, Style, Text } from "ol/style";
 import { getUid } from "ol/util";
 
 import type { CommunityPolygonItem } from "@/components/gis/community-map-panel";
@@ -22,10 +22,19 @@ export type VectorLayerState = {
   layer: VectorLayer<VectorSource>;
   isVisible: boolean;
   fillOpacity: number;
+  category: "community" | "reference";
+  defaultColor: string;
   availableGroupingColumns: string[];
   groupingColumn: string | null;
   groupingValueColors: Record<string, string>;
   groupingValueCounts: Record<string, number>;
+};
+
+export type MapControlVectorLayerItem = {
+  fileName: string;
+  color: string;
+  isVisible: boolean;
+  opacity: number;
 };
 
 type UseMapVectorLayersParams = {
@@ -41,6 +50,9 @@ type VectorLayerAddPayload = {
   layer: VectorLayer<VectorSource>;
   defaultFillOpacity: number;
   availableGroupingColumns: string[];
+  category?: "community" | "reference";
+  defaultColor?: string;
+  defaultVisibility?: boolean;
 };
 
 type VectorLayerAddOptions = {
@@ -62,9 +74,27 @@ function rgbaFromHex(hexColor: string, alpha: number): string {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
-function createVectorStyle(fillOpacity: number, color = DEFAULT_VECTOR_STROKE_COLOR): Style {
+function createVectorStyle(
+  fillOpacity: number,
+  color = DEFAULT_VECTOR_STROKE_COLOR,
+  geometryBucket: "point" | "line" | "polygon" = "polygon",
+  pointLabel: string | null = null,
+): Style {
   const effectiveFillOpacity =
     fillOpacity <= 0 ? MIN_HIT_DETECTION_FILL_OPACITY : fillOpacity;
+
+  const trimmedLabel = pointLabel?.trim() ?? "";
+  const textStyle = geometryBucket === "point" && trimmedLabel
+    ? new Text({
+      text: trimmedLabel,
+      font: '600 12px "Segoe UI", sans-serif',
+      offsetY: -14,
+      fill: new Fill({ color: "#0f172a" }),
+      stroke: new Stroke({ color: "rgba(255,255,255,0.95)", width: 3 }),
+      padding: [2, 4, 2, 4],
+      overflow: true,
+    })
+    : undefined;
 
   return new Style({
     stroke: new Stroke({
@@ -79,15 +109,30 @@ function createVectorStyle(fillOpacity: number, color = DEFAULT_VECTOR_STROKE_CO
       fill: new Fill({ color }),
       stroke: new Stroke({ color: "#ffffff", width: 1.5 }),
     }),
+    text: textStyle,
   });
 }
 
 function createHighlightedVectorStyle(
   fillOpacity: number,
   color = DEFAULT_VECTOR_STROKE_COLOR,
+  geometryBucket: "point" | "line" | "polygon" = "polygon",
+  pointLabel: string | null = null,
 ): Style[] {
   const effectiveFillOpacity =
     fillOpacity <= 0 ? MIN_HIT_DETECTION_FILL_OPACITY : fillOpacity;
+  const trimmedLabel = pointLabel?.trim() ?? "";
+  const textStyle = geometryBucket === "point" && trimmedLabel
+    ? new Text({
+      text: trimmedLabel,
+      font: '600 12px "Segoe UI", sans-serif',
+      offsetY: -14,
+      fill: new Fill({ color: "#0f172a" }),
+      stroke: new Stroke({ color: "rgba(255,255,255,0.98)", width: 4 }),
+      padding: [2, 4, 2, 4],
+      overflow: true,
+    })
+    : undefined;
 
   return [
     new Style({
@@ -117,6 +162,7 @@ function createHighlightedVectorStyle(
         fill: new Fill({ color }),
         stroke: new Stroke({ color: "#ffffff", width: 2 }),
       }),
+      text: textStyle,
     }),
   ];
 }
@@ -149,6 +195,7 @@ function applyVectorLayerStyle(
   fillOpacity: number,
   groupingColumn: string | null,
   groupingValueColors: Record<string, string>,
+  defaultColor: string,
   selectedVectorUidRef: { current: string | null },
 ) {
   const styleCache = new Map<string, Style>();
@@ -158,9 +205,11 @@ function applyVectorLayerStyle(
     const featureGeometryType = feature.getGeometry()?.getType();
     const groupValue = groupingColumn ? normalizeGroupValue(feature.get(groupingColumn)) : EMPTY_GROUP_LABEL;
     const color = groupingColumn
-      ? (groupingValueColors[groupValue] ?? DEFAULT_VECTOR_STROKE_COLOR)
-      : DEFAULT_VECTOR_STROKE_COLOR;
+      ? (groupingValueColors[groupValue] ?? defaultColor)
+      : defaultColor;
     const featureUid = getUid(feature);
+    const pointLabelRaw = feature.get("name");
+    const pointLabel = typeof pointLabelRaw === "string" ? pointLabelRaw : null;
     const isSelected = selectedVectorUidRef.current !== null && featureUid === selectedVectorUidRef.current;
     const geometryBucket = featureGeometryType?.includes("Point")
       ? "point"
@@ -168,7 +217,8 @@ function applyVectorLayerStyle(
         ? "line"
         : "polygon";
 
-    const key = `${geometryBucket}:${color}:${fillOpacity}`;
+    const labelKey = geometryBucket === "point" ? (pointLabel ?? "") : "";
+    const key = `${geometryBucket}:${color}:${fillOpacity}:${labelKey}`;
     if (isSelected) {
       const highlightedKey = `${key}:selected`;
       const existingHighlighted = highlightedStyleCache.get(highlightedKey);
@@ -176,7 +226,7 @@ function applyVectorLayerStyle(
         return existingHighlighted;
       }
 
-      const highlightedStyle = createHighlightedVectorStyle(fillOpacity, color);
+      const highlightedStyle = createHighlightedVectorStyle(fillOpacity, color, geometryBucket, pointLabel);
       highlightedStyleCache.set(highlightedKey, highlightedStyle);
       return highlightedStyle;
     }
@@ -186,7 +236,7 @@ function applyVectorLayerStyle(
       return existing;
     }
 
-    const style = createVectorStyle(fillOpacity, color);
+    const style = createVectorStyle(fillOpacity, color, geometryBucket, pointLabel);
     styleCache.set(key, style);
     return style;
   });
@@ -202,17 +252,28 @@ export function useMapVectorLayers({
 }: UseMapVectorLayersParams) {
   const [vectorLayers, setVectorLayers] = useState<Record<string, VectorLayerState>>({});
   const [communityMapLayerNames, setCommunityMapLayerNames] = useState<string[]>([]);
+  const [referenceLayerNames, setReferenceLayerNames] = useState<string[]>([]);
 
   const onVectorLayerAdd = useCallback((
     fileName: string,
     payload: VectorLayerAddPayload,
     options?: VectorLayerAddOptions,
   ) => {
-    setCommunityMapLayerNames((prev) => [fileName, ...prev.filter((name) => name !== fileName)]);
+    const category = payload.category ?? "community";
+
+    if (category === "community") {
+      setCommunityMapLayerNames((prev) => [fileName, ...prev.filter((name) => name !== fileName)]);
+      setReferenceLayerNames((prev) => prev.filter((name) => name !== fileName));
+    } else {
+      setReferenceLayerNames((prev) => [...prev.filter((name) => name !== fileName), fileName]);
+      setCommunityMapLayerNames((prev) => prev.filter((name) => name !== fileName));
+    }
 
     setVectorLayers((prev) => {
       const existing = prev[fileName];
       const nextFillOpacity = existing?.fillOpacity ?? payload.defaultFillOpacity;
+      const defaultColor = existing?.defaultColor ?? payload.defaultColor ?? DEFAULT_VECTOR_STROKE_COLOR;
+      const defaultVisibility = existing?.isVisible ?? payload.defaultVisibility ?? true;
       const nextGroupingColumn =
         existing?.groupingColumn && payload.availableGroupingColumns.includes(existing.groupingColumn)
           ? existing.groupingColumn
@@ -223,12 +284,13 @@ export function useMapVectorLayers({
       const featureList = featureSource?.getFeatures() ?? [];
       const groupingStats = collectGroupingStats(featureList, nextGroupingColumn);
 
-      vectorLayer.setVisible(existing?.isVisible ?? true);
+      vectorLayer.setVisible(defaultVisibility);
       applyVectorLayerStyle(
         vectorLayer,
         nextFillOpacity,
         nextGroupingColumn,
         groupingStats.valueColors,
+        defaultColor,
         selectedVectorUidRef,
       );
 
@@ -236,8 +298,10 @@ export function useMapVectorLayers({
         ...prev,
         [fileName]: {
           layer: vectorLayer,
-          isVisible: existing?.isVisible ?? true,
+          isVisible: defaultVisibility,
           fillOpacity: nextFillOpacity,
+          category,
+          defaultColor,
           availableGroupingColumns: payload.availableGroupingColumns,
           groupingColumn: nextGroupingColumn,
           groupingValueColors: groupingStats.valueColors,
@@ -284,6 +348,7 @@ export function useMapVectorLayers({
         fillOpacity,
         existing.groupingColumn,
         existing.groupingValueColors,
+        existing.defaultColor,
         selectedVectorUidRef,
       );
 
@@ -317,6 +382,7 @@ export function useMapVectorLayers({
         existing.fillOpacity,
         normalizedGrouping,
         groupingStats.valueColors,
+        existing.defaultColor,
         selectedVectorUidRef,
       );
 
@@ -349,6 +415,7 @@ export function useMapVectorLayers({
 
   const removeVectorLayer = useCallback((fileName: string) => {
     setCommunityMapLayerNames((prev) => prev.filter((name) => name !== fileName));
+    setReferenceLayerNames((prev) => prev.filter((name) => name !== fileName));
 
     setVectorLayers((prev) => {
       const existing = prev[fileName];
@@ -366,7 +433,7 @@ export function useMapVectorLayers({
     return communityMapLayerNames
       .map((fileName) => {
         const vectorLayer = vectorLayers[fileName];
-        if (!vectorLayer) {
+        if (!vectorLayer || vectorLayer.category !== "community") {
           return null;
         }
 
@@ -389,6 +456,24 @@ export function useMapVectorLayers({
       })
       .filter((item): item is CommunityPolygonItem => item !== null);
   }, [communityMapLayerNames, vectorLayers]);
+
+  const mapControlVectorLayerItems = useMemo<MapControlVectorLayerItem[]>(() => {
+    return referenceLayerNames
+      .map((fileName) => {
+        const vectorLayer = vectorLayers[fileName];
+        if (!vectorLayer || vectorLayer.category !== "reference") {
+          return null;
+        }
+
+        return {
+          fileName,
+          color: vectorLayer.defaultColor,
+          isVisible: vectorLayer.isVisible,
+          opacity: vectorLayer.fillOpacity,
+        };
+      })
+      .filter((item): item is MapControlVectorLayerItem => item !== null);
+  }, [referenceLayerNames, vectorLayers]);
 
   const activeLegendLayers = useMemo<ActiveLegendLayer[]>(() => {
     const layers: ActiveLegendLayer[] = [];
@@ -427,6 +512,7 @@ export function useMapVectorLayers({
         kind: "vector",
         title: fileName,
         fillOpacity: data.fillOpacity,
+        baseColor: data.defaultColor,
         groupingColumn: data.groupingColumn,
         groups: Object.entries(data.groupingValueCounts).map(([value, count]) => ({
           value,
@@ -442,6 +528,7 @@ export function useMapVectorLayers({
   return {
     vectorLayers,
     communityPolygonItems,
+    mapControlVectorLayerItems,
     activeLegendLayers,
     onVectorLayerAdd,
     onVectorLayerVisibilityChange,

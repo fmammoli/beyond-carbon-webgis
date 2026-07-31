@@ -1,5 +1,7 @@
 import type { Feature, FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
 
+import { sanitizeThreatMapRequest } from "@/lib/threat-map-sanitizer";
+
 export const DEFAULT_THREAT_MAP_API_BASE_URL = "";
 export const DEFAULT_THREAT_MAP_API_PATH_PREFIX = "/api/v1/threat-map";
 export const DEFAULT_THREAT_MAP_LOCAL_DEV_API_KEY = "chm_beyond_carbon_workshop";
@@ -19,6 +21,34 @@ export type ThreatMapJobStatus =
 
 export type ThreatMapPreset = "balanced" | "high";
 export type ThreatMapGeoJsonCrs = "EPSG:4326" | "EPSG:3857";
+
+export type ThreatMapOverlayLayerStyle = {
+  strokeColor?: string;
+  strokeWidth?: number;
+  fillColor?: string;
+  fillOpacity?: number;
+  markerColor?: string;
+  markerOutlineColor?: string;
+  markerSize?: number;
+  labelColor?: string;
+  labelBgColor?: string;
+};
+
+export type ThreatMapOverlayLayer = {
+  id: string;
+  label: string;
+  geojsonCrs: ThreatMapGeoJsonCrs;
+  geojson: FeatureCollection<Geometry, GeoJsonProperties> | Feature<Geometry, GeoJsonProperties>;
+  style?: ThreatMapOverlayLayerStyle;
+  showInLegend?: boolean;
+  legendOrder?: number;
+};
+
+type ThreatMapOverlayLayerWire = Omit<ThreatMapOverlayLayer, "geojsonCrs" | "showInLegend" | "legendOrder"> & {
+  geojsonCrs: ThreatMapGeoJsonCrs;
+  showInLegend?: boolean;
+  legendOrder?: number;
+};
 
 export type ThreatMapJobError = {
   code: string;
@@ -53,6 +83,7 @@ export type ThreatMapJob = {
 export type CreateThreatMapJobRequest = {
   geojson: FeatureCollection<Geometry, GeoJsonProperties> | Feature<Geometry, GeoJsonProperties>;
   geojsonCrs?: ThreatMapGeoJsonCrs;
+  overlayLayers?: ThreatMapOverlayLayer[];
   preset: ThreatMapPreset;
   width?: number;
   height?: number;
@@ -61,9 +92,9 @@ export type CreateThreatMapJobRequest = {
   outputFormat?: ThreatMapOutputFormat;
 };
 
-type CreateThreatMapJobRequestWire = Omit<CreateThreatMapJobRequest, "geojsonCrs"> & {
+type CreateThreatMapJobRequestWire = Omit<CreateThreatMapJobRequest, "geojsonCrs" | "overlayLayers"> & {
   geojsonCrs: ThreatMapGeoJsonCrs;
-  geojson_crs: ThreatMapGeoJsonCrs;
+  overlayLayers?: ThreatMapOverlayLayerWire[];
 };
 
 export type CreateThreatMapJobResponse = {
@@ -276,11 +307,17 @@ function inferGeojsonCrsFromPayload(
 
 function normalizeCreateThreatMapJobPayload(payload: CreateThreatMapJobRequest): CreateThreatMapJobRequestWire {
   const geojsonCrs = payload.geojsonCrs ?? inferGeojsonCrsFromPayload(payload.geojson);
+  const overlayLayers = payload.overlayLayers?.map((layer) => ({
+    ...layer,
+    geojsonCrs: layer.geojsonCrs,
+    showInLegend: layer.showInLegend,
+    legendOrder: layer.legendOrder,
+  }));
 
   return {
     ...payload,
     geojsonCrs,
-    geojson_crs: geojsonCrs,
+    overlayLayers,
   };
 }
 
@@ -594,8 +631,9 @@ export async function createThreatMapJob(
   payload: CreateThreatMapJobRequest,
   options?: ThreatMapClientOptions,
 ): Promise<CreateThreatMapJobResponse> {
-  validateThreatMapRequest(payload);
-  const payloadToSend = normalizeCreateThreatMapJobPayload(payload);
+  const sanitizedPayload = sanitizeThreatMapRequest(payload);
+  validateThreatMapRequest(sanitizedPayload);
+  const payloadToSend = normalizeCreateThreatMapJobPayload(sanitizedPayload);
 
   const response = await fetch(resolveThreatMapUrl("/jobs", options?.baseUrl), {
     method: "POST",

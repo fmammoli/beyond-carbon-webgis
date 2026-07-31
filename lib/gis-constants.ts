@@ -7,7 +7,7 @@ export const INDONESIA_CENTER_LON_LAT: [number, number] = [117.89, -0.78];
 export const INDONESIA_DEFAULT_ZOOM = 5;
 
 export const DEFAULT_R2_PMTILES_BASE_URL =
-	"https://pub-b35b693f4e7a4112af656d6983f8adc2.r2.dev/landcover-mapbiomas-maptiles";
+	"https://pub-b35b693f4e7a4112af656d6983f8adc2.r2.dev/landcover-mapbiomas-pmtiles";
 
 export const LANDCOVER_FILE_PREFIX = "";
 export const LANDCOVER_FILE_SUFFIX = "_landcover.pmtiles";
@@ -16,7 +16,7 @@ export const DEFAULT_LANDCOVER_OPACITY = 0.75;
 export const AGB_MIN_YEAR = 2000;
 export const AGB_MAX_YEAR = 2025;
 export const AGB_FILE_PREFIX = "";
-export const AGB_FILE_SUFFIX = "_agb.pmtiles";
+export const AGB_FILE_SUFFIX = "_agb-ctrees.pmtiles";
 export const DEFAULT_AGB_OPACITY = 0.75;
 export const DEFAULT_R2_AGB_PMTILES_BASE_URL =
 	"https://pub-b35b693f4e7a4112af656d6983f8adc2.r2.dev/agb-ctrees-pmtiles";
@@ -24,6 +24,8 @@ export const DEFAULT_R2_AGB_PMTILES_BASE_URL =
 export const DEFAULT_CHM_OPACITY = 0.75;
 export const DEFAULT_R2_CHM_PMTILES_URL =
 	"https://pub-b35b693f4e7a4112af656d6983f8adc2.r2.dev/chm-pmtiles/chm-indonesia.pmtiles";
+
+export const CHM_MAX_OVERZOOM_DELTA = 16;
 
 // Playback warmup controls: prefetch current viewport tiles for nearby years.
 export const PLAY_PREFETCH_YEAR_WINDOW = 3;

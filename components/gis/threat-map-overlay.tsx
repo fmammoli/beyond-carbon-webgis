@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import type { ThreatMapPixelRect } from "@/lib/threat-map-export";
+import type { CaptureMapScreenFocusRect } from "@/lib/map-capture-export";
 
 type ThreatMapOverlayProgress = {
   phaseLabel: string;
@@ -24,7 +25,7 @@ type ThreatMapOverlayDiagnostics = {
 
 type ThreatMapOverlayProps = {
   isVisible: boolean;
-  pixelRect: ThreatMapPixelRect | null;
+  pixelRect: (ThreatMapPixelRect | CaptureMapScreenFocusRect) | null;
   sideKilometers: number;
   minYear: number;
   maxYear: number;
@@ -32,6 +33,8 @@ type ThreatMapOverlayProps = {
   displayedError: string | null;
   onCancel: () => void;
   onGenerate: () => void;
+  generateLabel?: string;
+  footerText?: string;
 };
 
 export function ThreatMapOverlay({
@@ -44,6 +47,8 @@ export function ThreatMapOverlay({
   displayedError,
   onCancel,
   onGenerate,
+  generateLabel,
+  footerText,
 }: ThreatMapOverlayProps) {
   if (!isVisible || !pixelRect) {
     return null;
@@ -109,12 +114,12 @@ export function ThreatMapOverlay({
           disabled={!canGenerate}
           onClick={onGenerate}
         >
-          Generate
+          {generateLabel ?? "Generate"}
         </Button>
       </div>
 
       <div className="pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2 rounded-md border border-white/80 bg-white/92 px-3 py-2 text-xs text-slate-800 shadow-lg">
-        Aim a fixed {sideKilometers} km square, then generate MP4 ({minYear}-{maxYear}).
+        {footerText ?? `Aim a fixed ${sideKilometers} km square, then generate MP4 (${minYear}-${maxYear}).`}
       </div>
 
       {displayedError ? (

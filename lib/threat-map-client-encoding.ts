@@ -258,6 +258,22 @@ function resolveFrameDurationSeconds(manifest: ThreatMapFramesManifest | null): 
   return 1;
 }
 
+function drawBitmapContained(
+  context: CanvasRenderingContext2D,
+  bitmap: ImageBitmap,
+  targetWidth: number,
+  targetHeight: number,
+): void {
+  const scale = Math.min(targetWidth / bitmap.width, targetHeight / bitmap.height);
+  const drawWidth = Math.max(1, Math.round(bitmap.width * scale));
+  const drawHeight = Math.max(1, Math.round(bitmap.height * scale));
+  const offsetX = Math.floor((targetWidth - drawWidth) / 2);
+  const offsetY = Math.floor((targetHeight - drawHeight) / 2);
+
+  context.clearRect(0, 0, targetWidth, targetHeight);
+  context.drawImage(bitmap, offsetX, offsetY, drawWidth, drawHeight);
+}
+
 async function encodeFramesToMp4(
   frames: YearFrameEntry[],
   manifest: ThreatMapFramesManifest | null,
@@ -284,8 +300,8 @@ async function encodeFramesToMp4(
   } = await import("mediabunny");
 
   const firstBitmap = await createImageBitmap(frames[0].blob);
-  const width = Math.floor(manifest?.width ?? firstBitmap.width);
-  const height = Math.floor(manifest?.height ?? firstBitmap.height);
+  const width = Math.max(1, Math.floor(firstBitmap.width));
+  const height = Math.max(1, Math.floor(firstBitmap.height));
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -293,6 +309,7 @@ async function encodeFramesToMp4(
 
   const context = canvas.getContext("2d");
   if (!context) {
+    firstBitmap.close();
     throw new Error("Failed to initialize canvas context for MP4 encoding.");
   }
 
@@ -305,6 +322,7 @@ async function encodeFramesToMp4(
   });
 
   if (!selectedCodec) {
+    firstBitmap.close();
     throw new Error("This browser cannot encode MP4 video for Threat Map frames.");
   }
 
@@ -325,8 +343,7 @@ async function encodeFramesToMp4(
   const frameDurationSeconds = resolveFrameDurationSeconds(manifest);
   let timestampSeconds = 0;
 
-  context.clearRect(0, 0, width, height);
-  context.drawImage(firstBitmap, 0, 0, width, height);
+  drawBitmapContained(context, firstBitmap, width, height);
   firstBitmap.close();
   await videoSource.add(timestampSeconds, frameDurationSeconds, { keyFrame: true });
   timestampSeconds += frameDurationSeconds;
@@ -341,8 +358,7 @@ async function encodeFramesToMp4(
   for (let index = 1; index < frames.length; index += 1) {
     const frame = frames[index];
     const bitmap = await createImageBitmap(frame.blob);
-    context.clearRect(0, 0, width, height);
-    context.drawImage(bitmap, 0, 0, width, height);
+    drawBitmapContained(context, bitmap, width, height);
     bitmap.close();
 
     await videoSource.add(timestampSeconds, frameDurationSeconds, { keyFrame: true });

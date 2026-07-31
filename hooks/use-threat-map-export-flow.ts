@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Feature as GeoJsonFeature, GeoJsonProperties, Geometry } from "geojson";
+import type { Feature as GeoJsonFeature, FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
 import { bboxClip } from "@turf/turf";
 import GeoJSON from "ol/format/GeoJSON";
 import type { Extent } from "ol/extent";
@@ -47,6 +47,47 @@ function isCoordWithinBbox(coord: [number, number], bbox: GeoJsonBbox): boolean 
     && coord[1] <= bbox[3];
 }
 
+function collectGeometryCoordinates(geometry: Geometry): [number, number][] {
+  const flattened: [number, number][] = [];
+
+  const visit = (value: unknown) => {
+    if (!Array.isArray(value) || value.length === 0) {
+      return;
+    }
+
+    if (typeof value[0] === "number") {
+      const coordinate = value as number[];
+      if (coordinate.length >= 2) {
+        flattened.push([coordinate[0]!, coordinate[1]!]);
+      }
+      return;
+    }
+
+    for (const child of value) {
+      visit(child);
+    }
+  };
+
+  if (geometry.type === "GeometryCollection") {
+    for (const child of geometry.geometries) {
+      flattened.push(...collectGeometryCoordinates(child));
+    }
+    return flattened;
+  }
+
+  visit((geometry as Exclude<Geometry, { type: "GeometryCollection" }>).coordinates);
+  return flattened;
+}
+
+function isGeometryFullyWithinBbox(geometry: Geometry, bbox: GeoJsonBbox): boolean {
+  const coordinates = collectGeometryCoordinates(geometry);
+  if (coordinates.length === 0) {
+    return false;
+  }
+
+  return coordinates.every((coord) => isCoordWithinBbox(coord, bbox));
+}
+
 function clipFeatureToBbox(
   feature: GeoJsonFeature<Geometry, GeoJsonProperties>,
   bbox: GeoJsonBbox,
@@ -86,7 +127,8 @@ function clipFeatureToBbox(
       properties: feature.properties,
     };
   } catch {
-    return feature;
+    // Conservative fallback: include only if already fully within AOI.
+    return isGeometryFullyWithinBbox(geometry, bbox) ? feature : null;
   }
 }
 
@@ -108,6 +150,24 @@ function getImageExtensionFromPath(pathValue: string): string {
   }
 
   return match[1] === "jpeg" ? "jpg" : match[1]!;
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function toThreatMapLayerId(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    || "overlay-layer";
 }
 
 export function useThreatMapExportFlow({
@@ -277,12 +337,15 @@ export function useThreatMapExportFlow({
     const bottomLeft = map.getCoordinateFromPixel([frozenRect.left, frozenRect.top + frozenRect.height]);
 
     const mapProjectionCode = map.getView().getProjection()?.getCode() ?? "EPSG:3857";
+    const threatMapGeojsonCrs = "EPSG:3857" as const;
 
     const ring = [topLeft, topRight, bottomRight, bottomLeft, topLeft]
       .map((coordinate) => [coordinate[0], coordinate[1]] as [number, number]);
-
-    const ringWgs84 = ring.map((coordinate) =>
-      transformCoordinate(coordinate, mapProjectionCode, "EPSG:4326") as [number, number]);
+    const ringThreatMapProjection = ring.map((coordinate) =>
+      mapProjectionCode === threatMapGeojsonCrs
+        ? coordinate
+        : (transformCoordinate(coordinate, mapProjectionCode, threatMapGeojsonCrs) as [number, number])
+    );
 
     const squareBboxMapProjection: GeoJsonBbox = [
       Math.min(...ring.map((coord) => coord[0])),
@@ -298,13 +361,36 @@ export function useThreatMapExportFlow({
       Math.max(topLeft[1], topRight[1], bottomRight[1], bottomLeft[1]),
     ];
 
-    const overlayFeatures: Array<GeoJsonFeature<Geometry, GeoJsonProperties>> = [];
+    const overlayLayers: Array<{
+      id: string;
+      label: string;
+      geojsonCrs: "EPSG:3857";
+      geojson: FeatureCollection<Geometry, GeoJsonProperties> | GeoJsonFeature<Geometry, GeoJsonProperties>;
+      style: {
+        strokeColor?: string;
+        strokeWidth?: number;
+        fillColor?: string;
+        fillOpacity?: number;
+        markerColor?: string;
+        markerOutlineColor?: string;
+        markerSize?: number;
+        labelColor?: string;
+        labelBgColor?: string;
+      };
+      showInLegend: true;
+      legendOrder: number;
+    }> = [];
+    let overlayLayerOrder = 10;
+
     for (const [layerName, layerState] of Object.entries(vectorLayers)) {
       if (!layerState.isVisible) {
         continue;
       }
 
       const features = layerState.layer.getSource()?.getFeatures() ?? [];
+      const overlayFeaturesForLayer: Array<GeoJsonFeature<Geometry, GeoJsonProperties>> = [];
+      let hasPointGeometry = false;
+      let hasAreaOrLineGeometry = false;
 
       for (const feature of features) {
         const geometry = feature.getGeometry();
@@ -343,6 +429,19 @@ export function useThreatMapExportFlow({
             },
           };
 
+          if (geometryObject.type === "Point" || geometryObject.type === "MultiPoint") {
+            const existingName = readNonEmptyString(overlayFeature.properties?.name);
+            if (!existingName) {
+              const fallbackLabel = readNonEmptyString(overlayFeature.properties?.label);
+              if (fallbackLabel) {
+                overlayFeature.properties = {
+                  ...overlayFeature.properties,
+                  name: fallbackLabel,
+                };
+              }
+            }
+          }
+
           const clippedOverlayFeature = clipFeatureToBbox(overlayFeature, squareBboxMapProjection);
           if (clippedOverlayFeature) {
             const clippedGeometry = clippedOverlayFeature.geometry;
@@ -350,20 +449,72 @@ export function useThreatMapExportFlow({
               dataProjection: mapProjectionCode,
               featureProjection: mapProjectionCode,
             });
-            projectedGeometry.transform(mapProjectionCode, "EPSG:4326");
+            if (mapProjectionCode !== threatMapGeojsonCrs) {
+              projectedGeometry.transform(mapProjectionCode, threatMapGeojsonCrs);
+            }
 
-            overlayFeatures.push({
+            const projectedFeature = {
               ...clippedOverlayFeature,
               geometry: geojsonFormatRef.current.writeGeometryObject(projectedGeometry, {
-                dataProjection: "EPSG:4326",
-                featureProjection: "EPSG:4326",
+                dataProjection: threatMapGeojsonCrs,
+                featureProjection: threatMapGeojsonCrs,
               }) as Geometry,
-            });
+            };
+
+            if (projectedFeature.geometry.type === "Point" || projectedFeature.geometry.type === "MultiPoint") {
+              hasPointGeometry = true;
+            } else {
+              hasAreaOrLineGeometry = true;
+            }
+
+            overlayFeaturesForLayer.push(projectedFeature);
           }
         } catch {
           // Skip geometries that cannot be converted to GeoJSON.
         }
       }
+
+      if (overlayFeaturesForLayer.length === 0) {
+        continue;
+      }
+
+      const onlyPointGeometries = hasPointGeometry && !hasAreaOrLineGeometry;
+      const overlayGeojson: FeatureCollection<Geometry, GeoJsonProperties> | GeoJsonFeature<Geometry, GeoJsonProperties> =
+        onlyPointGeometries && overlayFeaturesForLayer.length === 1
+          ? overlayFeaturesForLayer[0]
+          : {
+              type: "FeatureCollection",
+              features: overlayFeaturesForLayer,
+            };
+
+      overlayLayers.push({
+        id: toThreatMapLayerId(layerName),
+        label: layerName,
+        geojsonCrs: threatMapGeojsonCrs,
+        geojson: overlayGeojson,
+        style: {
+          ...(hasAreaOrLineGeometry
+            ? {
+                strokeColor: layerState.defaultColor,
+                strokeWidth: 2,
+                fillColor: layerState.defaultColor,
+                fillOpacity: layerState.fillOpacity,
+              }
+            : {}),
+          ...(hasPointGeometry
+            ? {
+                markerColor: layerState.defaultColor,
+                markerOutlineColor: "#ffffff",
+                markerSize: 8,
+                labelColor: "#111827",
+                labelBgColor: "#ffffff",
+              }
+            : {}),
+        },
+        showInLegend: true,
+        legendOrder: overlayLayerOrder,
+      });
+      overlayLayerOrder += 10;
     }
 
     setThreatMapExportStatus("generating");
@@ -380,21 +531,21 @@ export function useThreatMapExportFlow({
               type: "Feature",
               geometry: {
                 type: "Polygon",
-                coordinates: [ringWgs84],
+                coordinates: [ringThreatMapProjection],
               },
               properties: {
                 source: "threat-map-square",
               },
             },
-            ...overlayFeatures,
           ],
         },
-        geojsonCrs: "EPSG:4326",
+        geojsonCrs: threatMapGeojsonCrs,
+        overlayLayers,
         preset: "balanced",
         outputFormat: "frames_tar_gz",
       });
       onMessage(
-        `Threat Map job submitted. Generating... (${overlayFeatures.length} overlay feature${overlayFeatures.length === 1 ? "" : "s"} included)`
+        `Threat Map job submitted. Generating... (${overlayLayers.length} overlay layer${overlayLayers.length === 1 ? "" : "s"} included)`
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Threat Map export failed.";

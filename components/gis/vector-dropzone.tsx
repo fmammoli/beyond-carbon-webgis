@@ -32,7 +32,7 @@ type VectorDropzoneHandle = {
 };
 
 const UPLOADED_VECTOR_Z_INDEX = 2000;
-const DEFAULT_VECTOR_FILL_OPACITY = 0.2;
+const DEFAULT_VECTOR_FILL_OPACITY = 0;
 
 function createVectorStyle(fillOpacity: number): Style {
   return new Style({

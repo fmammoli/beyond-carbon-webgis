@@ -10,6 +10,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import type { MapControlVectorLayerItem } from "@/hooks/use-map-vector-layers";
 
 type MapControlsProps = {
   isSatelliteVisible: boolean;
@@ -20,6 +21,7 @@ type MapControlsProps = {
   agbOpacity: number;
   isChmVisible: boolean;
   chmOpacity: number;
+  vectorLayerItems: MapControlVectorLayerItem[];
   onSatelliteChange: (visible: boolean) => void;
   onBoundariesAndPlacesChange: (visible: boolean) => void;
   onLandcoverChange: (visible: boolean) => void;
@@ -28,6 +30,8 @@ type MapControlsProps = {
   onAgbOpacityChange: (opacity: number) => void;
   onChmChange: (visible: boolean) => void;
   onChmOpacityChange: (opacity: number) => void;
+  onVectorLayerChange: (fileName: string, visible: boolean) => void;
+  onVectorLayerOpacityChange: (fileName: string, opacity: number) => void;
   embedded?: boolean;
 };
 
@@ -123,6 +127,7 @@ export function MapControls({
   agbOpacity,
   isChmVisible,
   chmOpacity,
+  vectorLayerItems,
   onSatelliteChange,
   onBoundariesAndPlacesChange,
   onLandcoverChange,
@@ -131,6 +136,8 @@ export function MapControls({
   onAgbOpacityChange,
   onChmChange,
   onChmOpacityChange,
+  onVectorLayerChange,
+  onVectorLayerOpacityChange,
   embedded = false,
 }: MapControlsProps) {
   const controlsContent = (
@@ -179,6 +186,19 @@ export function MapControls({
           switchAriaLabel="Toggle canopy height model layer"
           sliderAriaLabel="Set canopy height model opacity"
         />
+        {vectorLayerItems.map((item) => (
+          <ToggleOpacityRow
+            key={item.fileName}
+            icon={<span className="size-3.5 rounded-full border border-slate-300" style={{ backgroundColor: item.color }} />}
+            label={item.fileName}
+            checked={item.isVisible}
+            opacity={item.opacity}
+            onCheckedChange={(checked) => onVectorLayerChange(item.fileName, checked)}
+            onOpacityChange={(opacity) => onVectorLayerOpacityChange(item.fileName, opacity)}
+            switchAriaLabel={`Toggle ${item.fileName}`}
+            sliderAriaLabel={`Set opacity for ${item.fileName}`}
+          />
+        ))}
     </div>
   );
 

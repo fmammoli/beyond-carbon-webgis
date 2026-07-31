@@ -21,7 +21,6 @@ type PmtilesLayerProps = {
   baseUrl: string;
   archiveOptions?: PmtilesArchiveOptions;
   prefetchNeighbors?: boolean;
-  onLayerReady?: (layer: TileLayer<XYZ> | null) => void;
   onFrameLoadingChange?: (loading: boolean) => void;
   onYearFrameReady?: (readyYear: number) => void;
 };
@@ -35,7 +34,6 @@ export function PmtilesLayer({
   baseUrl,
   archiveOptions,
   prefetchNeighbors = true,
-  onLayerReady,
   onFrameLoadingChange,
   onYearFrameReady,
 }: PmtilesLayerProps) {
@@ -43,6 +41,30 @@ export function PmtilesLayer({
   const stagingLayerRef = useRef<TileLayer<XYZ> | null>(null);
   const sourceCacheRef = useRef(new globalThis.Map<string, XYZ>());
   const transitionTokenRef = useRef(0);
+  const opacityRef = useRef(opacity);
+  const initConfigRef = useRef({
+    year,
+    visible,
+    opacity,
+    renderMode,
+    archiveOptions,
+    prefetchNeighbors,
+  });
+
+  useEffect(() => {
+    initConfigRef.current = {
+      year,
+      visible,
+      opacity,
+      renderMode,
+      archiveOptions,
+      prefetchNeighbors,
+    };
+  }, [archiveOptions, opacity, prefetchNeighbors, renderMode, visible, year]);
+
+  useEffect(() => {
+    opacityRef.current = opacity;
+  }, [opacity]);
 
   const getCacheKey = (targetYear: number, mode: PmtilesRenderMode): string => `${targetYear}:${mode}`;
 
@@ -51,22 +73,35 @@ export function PmtilesLayer({
       return;
     }
 
-    const source = createPmtilesXyzSource(baseUrl, year, renderMode, archiveOptions);
+    const {
+      year: initialYear,
+      visible: initialVisible,
+      opacity: initialOpacity,
+      renderMode: initialRenderMode,
+      archiveOptions: initialArchiveOptions,
+      prefetchNeighbors: initialPrefetchNeighbors,
+    } = initConfigRef.current;
+
+    const source = createPmtilesXyzSource(
+      baseUrl,
+      initialYear,
+      initialRenderMode,
+      initialArchiveOptions,
+    );
     const sourceCache = sourceCacheRef.current;
-    sourceCache.set(getCacheKey(year, renderMode), source);
+    sourceCache.set(getCacheKey(initialYear, initialRenderMode), source);
 
     const layer = new TileLayer({
       source,
-      visible,
-      opacity,
+      visible: initialVisible,
+      opacity: initialOpacity,
       zIndex: 10,
     });
 
     activeLayerRef.current = layer;
-    onLayerReady?.(layer);
     map.addLayer(layer);
-    if (prefetchNeighbors) {
-      prefetchAdjacentPmtiles(baseUrl, year, archiveOptions);
+    if (initialPrefetchNeighbors) {
+      prefetchAdjacentPmtiles(baseUrl, initialYear, initialArchiveOptions);
     }
 
     return () => {
@@ -82,22 +117,10 @@ export function PmtilesLayer({
 
       activeLayerRef.current = null;
       stagingLayerRef.current = null;
-      onLayerReady?.(null);
       onFrameLoadingChange?.(false);
       sourceCache.clear();
     };
-  }, [
-    archiveOptions,
-    baseUrl,
-    map,
-    onFrameLoadingChange,
-    onLayerReady,
-    opacity,
-    prefetchNeighbors,
-    renderMode,
-    visible,
-    year,
-  ]);
+  }, [baseUrl, map, onFrameLoadingChange]);
 
   useEffect(() => {
     const activeLayer = activeLayerRef.current;
@@ -178,7 +201,7 @@ export function PmtilesLayer({
         return;
       }
 
-      currentStagingLayer.setOpacity(opacity);
+      currentStagingLayer.setOpacity(opacityRef.current);
       currentStagingLayer.setZIndex(10);
       activeLayerRef.current = currentStagingLayer;
       stagingLayerRef.current = null;
@@ -187,7 +210,6 @@ export function PmtilesLayer({
         map.removeLayer(previousActiveLayer);
       }
 
-      onLayerReady?.(currentStagingLayer);
       onFrameLoadingChange?.(false);
       onYearFrameReady?.(year);
       if (prefetchNeighbors) {
@@ -259,9 +281,7 @@ export function PmtilesLayer({
     baseUrl,
     map,
     onFrameLoadingChange,
-    onLayerReady,
     onYearFrameReady,
-    opacity,
     prefetchNeighbors,
     renderMode,
     visible,

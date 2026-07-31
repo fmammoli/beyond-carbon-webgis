@@ -100,6 +100,22 @@ function resolveFrameDurationSeconds(manifest: ThreatMapFramesManifest | null): 
   return 1;
 }
 
+function drawBitmapContained(
+  context: OffscreenCanvasRenderingContext2D,
+  bitmap: ImageBitmap,
+  targetWidth: number,
+  targetHeight: number,
+): void {
+  const scale = Math.min(targetWidth / bitmap.width, targetHeight / bitmap.height);
+  const drawWidth = Math.max(1, Math.round(bitmap.width * scale));
+  const drawHeight = Math.max(1, Math.round(bitmap.height * scale));
+  const offsetX = Math.floor((targetWidth - drawWidth) / 2);
+  const offsetY = Math.floor((targetHeight - drawHeight) / 2);
+
+  context.clearRect(0, 0, targetWidth, targetHeight);
+  context.drawImage(bitmap, offsetX, offsetY, drawWidth, drawHeight);
+}
+
 function postProgress(requestId: string, completed: number, total: number, message: string): void {
   const payload: WorkerProgressMessage = {
     type: "progress",
@@ -338,8 +354,8 @@ async function encodeFramesToMp4InWorker(
   const firstBlob = toBlobFromUint8Array(firstFrame.bytes, "image/png");
   const firstBitmap = await createImageBitmap(firstBlob);
 
-  const width = Math.floor(manifest?.width ?? firstBitmap.width);
-  const height = Math.floor(manifest?.height ?? firstBitmap.height);
+  const width = Math.max(1, Math.floor(firstBitmap.width));
+  const height = Math.max(1, Math.floor(firstBitmap.height));
 
   const canvas = new OffscreenCanvas(width, height);
   const context = canvas.getContext("2d");
@@ -378,8 +394,7 @@ async function encodeFramesToMp4InWorker(
   const frameDurationSeconds = resolveFrameDurationSeconds(manifest);
   let timestampSeconds = 0;
 
-  context.clearRect(0, 0, width, height);
-  context.drawImage(firstBitmap, 0, 0, width, height);
+  drawBitmapContained(context, firstBitmap, width, height);
   firstBitmap.close();
 
   await videoSource.add(timestampSeconds, frameDurationSeconds, { keyFrame: true });
@@ -392,8 +407,7 @@ async function encodeFramesToMp4InWorker(
     const frameBlob = toBlobFromUint8Array(frame.bytes, "image/png");
     const bitmap = await createImageBitmap(frameBlob);
 
-    context.clearRect(0, 0, width, height);
-    context.drawImage(bitmap, 0, 0, width, height);
+    drawBitmapContained(context, bitmap, width, height);
     bitmap.close();
 
     await videoSource.add(timestampSeconds, frameDurationSeconds, { keyFrame: true });

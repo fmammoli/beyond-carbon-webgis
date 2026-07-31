@@ -14,7 +14,7 @@ import VectorSource from "ol/source/Vector";
 import { getArea as getGeodesicArea, getDistance as getGeodesicDistance } from "ol/sphere";
 import { Circle as CircleStyle, Fill, Stroke, Style } from "ol/style";
 
-const DEFAULT_VECTOR_FILL_OPACITY = 0.2;
+const DEFAULT_VECTOR_FILL_OPACITY = 0;
 const UPLOADED_VECTOR_Z_INDEX = 2000;
 const DRAW_LAYER_Z_INDEX = 2300;
 const DRAW_CLOSE_TOLERANCE_PIXELS = 14;
@@ -61,6 +61,10 @@ type PolygonDraftMetrics = {
 type PendingPolygonConfirmState = {
   vertices: Coordinate[];
   metrics: PolygonDraftMetrics;
+};
+
+type PendingPointConfirmState = {
+  coordinate: Coordinate;
 };
 
 type UseCommunityPolygonDrawingParams = {
@@ -186,10 +190,13 @@ export function useCommunityPolygonDrawing({
   const [drawingVertices, setDrawingVertices] = useState<Coordinate[]>([]);
   const [pendingPolygonConfirm, setPendingPolygonConfirm] =
     useState<PendingPolygonConfirmState | null>(null);
+  const [pendingPointConfirm, setPendingPointConfirm] =
+    useState<PendingPointConfirmState | null>(null);
 
   const drawingVerticesRef = useRef<Coordinate[]>([]);
   const drawingLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const communityPolygonCounterRef = useRef(1);
+  const communityPointCounterRef = useRef(1);
 
   const clearDrawingState = useCallback(() => {
     drawingVerticesRef.current = [];
@@ -199,6 +206,7 @@ export function useCommunityPolygonDrawing({
   const cancelDrawing = useCallback(() => {
     setIsDrawingPolygon(false);
     setPendingPolygonConfirm(null);
+    setPendingPointConfirm(null);
     clearDrawingState();
     onMessage("Polygon drawing canceled.");
   }, [clearDrawingState, onMessage]);
@@ -206,6 +214,7 @@ export function useCommunityPolygonDrawing({
   const startDrawing = useCallback(() => {
     setIsDrawingPolygon(true);
     setPendingPolygonConfirm(null);
+    setPendingPointConfirm(null);
     clearDrawingState();
     onMessage(
       "Drawing started. Click vertices, then click the first vertex to close the polygon.",
@@ -240,6 +249,13 @@ export function useCommunityPolygonDrawing({
       onMessage(baseMessage);
     }
   }, [maxCommunityBoundaryBufferKilometers, maxCommunityBoundaryBufferMeters, onMessage]);
+
+  const finalizePointDrawing = useCallback((coordinate: Coordinate) => {
+    setPendingPointConfirm({
+      coordinate: [...coordinate],
+    });
+    onMessage("Point marker detected. Add an optional label and confirm.");
+  }, [onMessage]);
 
   const confirmPendingPolygon = useCallback(() => {
     if (!map || !pendingPolygonConfirm) {
@@ -297,6 +313,56 @@ export function useCommunityPolygonDrawing({
     setPendingPolygonConfirm(null);
     clearDrawingState();
     onMessage("Polygon discarded. Continue drawing a new polygon.");
+  }, [clearDrawingState, onMessage]);
+
+  const confirmPendingPoint = useCallback((labelInput: string) => {
+    if (!map || !pendingPointConfirm) {
+      return;
+    }
+
+    const pointLabel = labelInput.trim();
+    const pointIndex = communityPointCounterRef.current;
+    communityPointCounterRef.current += 1;
+    const fileName = pointLabel
+      ? `Community point ${pointIndex}: ${pointLabel}`
+      : `Community point ${pointIndex}`;
+
+    const pointFeature = new Feature({
+      geometry: new Point(pendingPointConfirm.coordinate),
+      ...(pointLabel ? { name: pointLabel } : {}),
+    });
+
+    const source = new VectorSource({ features: [pointFeature] });
+    const layer = new VectorLayer({
+      source,
+      zIndex: UPLOADED_VECTOR_Z_INDEX,
+      properties: {
+        name: fileName,
+        isVectorUploadLayer: true,
+        isCommunityPolygonLayer: true,
+        isCommunityPointLayer: true,
+      },
+    });
+
+    map.addLayer(layer);
+    onVectorLayerAdd(fileName, {
+      layer,
+      defaultFillOpacity: DEFAULT_VECTOR_FILL_OPACITY,
+      availableGroupingColumns: pointLabel ? ["name"] : [],
+    });
+
+    clearDrawingState();
+    setPendingPointConfirm(null);
+    setPendingPolygonConfirm(null);
+    setIsDrawingPolygon(false);
+
+    onMessage(pointLabel ? `${fileName} added.` : "Point marker added.");
+  }, [clearDrawingState, map, onMessage, onVectorLayerAdd, pendingPointConfirm]);
+
+  const discardPendingPoint = useCallback(() => {
+    setPendingPointConfirm(null);
+    clearDrawingState();
+    onMessage("Point marker discarded. Continue drawing a new feature.");
   }, [clearDrawingState, onMessage]);
 
   useEffect(() => {
@@ -382,7 +448,7 @@ export function useCommunityPolygonDrawing({
   }, [isDrawingPolygon, map, pendingPolygonConfirm]);
 
   useEffect(() => {
-    if (!map || !isDrawingPolygon) {
+    if (!map || !isDrawingPolygon || pendingPolygonConfirm || pendingPointConfirm) {
       return;
     }
 
@@ -390,6 +456,14 @@ export function useCommunityPolygonDrawing({
       event: MapBrowserEvent<PointerEvent | KeyboardEvent | WheelEvent>,
     ) => {
       const currentVertices = drawingVerticesRef.current;
+
+      if (
+        currentVertices.length === 1
+        && isNearFirstVertex(map, currentVertices[0]!, event.coordinate)
+      ) {
+        finalizePointDrawing(currentVertices[0]!);
+        return;
+      }
 
       if (
         currentVertices.length >= 3 &&
@@ -418,17 +492,20 @@ export function useCommunityPolygonDrawing({
     return () => {
       map.un("singleclick", handleMapSingleClick);
     };
-  }, [finalizePolygonDrawing, isDrawingPolygon, map, onMessage]);
+  }, [finalizePointDrawing, finalizePolygonDrawing, isDrawingPolygon, map, onMessage, pendingPointConfirm, pendingPolygonConfirm]);
 
   return {
     isDrawingPolygon,
     drawingVertices,
     pendingPolygonConfirm,
+    pendingPointConfirm,
     startDrawing,
     cancelDrawing,
     confirmPendingPolygon,
     discardPendingPolygon,
+    confirmPendingPoint,
+    discardPendingPoint,
   };
 }
 
-export type { PendingPolygonConfirmState, PolygonDraftMetrics };
+export type { PendingPointConfirmState, PendingPolygonConfirmState, PolygonDraftMetrics };

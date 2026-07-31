@@ -14,7 +14,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 
-type ActiveLegendLayer =
+export type ActiveLegendLayer =
   | {
       id: string;
       kind: "landcover";
@@ -35,6 +35,7 @@ type ActiveLegendLayer =
       kind: "vector";
       title: string;
       fillOpacity: number;
+      baseColor?: string;
       groupingColumn?: string | null;
       groups?: Array<{ value: string; color: string; count: number }>;
     };
@@ -198,6 +199,7 @@ function AgbLegendPanel() {
 
 function ChmLegendPanel() {
   const gradientStops = chmLegend.colors.join(", ");
+  const chmStopLabels = chmLegend.breaks.map((value) => String(value));
 
   return (
     <div className="rounded-md border border-slate-200/80 bg-white p-2.5">
@@ -208,13 +210,10 @@ function ChmLegendPanel() {
         className="h-10 rounded-sm border border-slate-200/80"
         style={{ background: `linear-gradient(to right, ${gradientStops})` }}
       />
-      <div className="mt-2 flex items-start justify-between gap-1 px-0.5 text-[10px] leading-none text-slate-700">
-        <span>0</span>
-        <span>1</span>
-        <span>15</span>
-        <span>30</span>
-        <span>45</span>
-        <span>&gt; 60</span>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-0.5 text-[10px] leading-none text-slate-700">
+        {chmStopLabels.map((label, index) => (
+          <span key={`${label}:${index}`}>{label}</span>
+        ))}
       </div>
     </div>
   );
@@ -223,11 +222,13 @@ function ChmLegendPanel() {
 function VectorLegendPanel({
   title,
   fillOpacity,
+  baseColor = "#ff3b30",
   groupingColumn,
   groups,
 }: {
   title: string;
   fillOpacity: number;
+  baseColor?: string;
   groupingColumn?: string | null;
   groups?: Array<{ value: string; color: string; count: number }>;
 }) {
@@ -256,13 +257,17 @@ function VectorLegendPanel({
         ) : (
           <>
             <div className="flex items-center gap-2">
-              <span className="h-0.5 w-5 rounded bg-[#ff3b30]" />
+              <span className="h-0.5 w-5 rounded" style={{ backgroundColor: baseColor }} />
               <span>Boundary stroke</span>
             </div>
             <div className="flex items-center gap-2">
               <span
-                className="h-3 w-5 rounded border border-[#ff3b30]/70"
-                style={{ backgroundColor: `rgba(255, 59, 48, ${fillOpacity})` }}
+                className="h-3 w-5 rounded border"
+                style={{
+                  borderColor: `${baseColor}B3`,
+                  backgroundColor: baseColor,
+                  opacity: fillOpacity,
+                }}
               />
               <span>Polygon fill ({Math.round(fillOpacity * 100)}%)</span>
             </div>
@@ -331,6 +336,7 @@ export function Legend({ open, onOpenChange, activeLayers }: LegendProps) {
                       key={layer.id}
                       title={layer.title}
                       fillOpacity={layer.fillOpacity}
+                      baseColor={layer.baseColor}
                       groupingColumn={layer.groupingColumn}
                       groups={layer.groups}
                     />
@@ -346,5 +352,3 @@ export function Legend({ open, onOpenChange, activeLayers }: LegendProps) {
     </Collapsible>
   );
 }
-
-export type { ActiveLegendLayer };

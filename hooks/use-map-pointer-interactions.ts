@@ -4,71 +4,36 @@ import { useCallback, useEffect, useState, type MutableRefObject } from "react";
 import type MapBrowserEvent from "ol/MapBrowserEvent";
 import Feature from "ol/Feature";
 import type OlGeometry from "ol/geom/Geometry";
-import type TileLayer from "ol/layer/Tile";
 import type OLMap from "ol/Map";
 import { getArea as getGeodesicArea } from "ol/sphere";
-import XYZ from "ol/source/XYZ";
 import { getUid } from "ol/util";
 
-import {
-  AGB_SCALE_FACTOR,
-  AGB_TRANSPARENT_RAW_THRESHOLD,
-  getAgbDisplayColor,
-} from "@/lib/agb-legend";
-import {
-  CHM_SCALE_FACTOR,
-  CHM_TRANSPARENT_RAW_THRESHOLD,
-  getChmDisplayColor,
-} from "@/lib/chm-legend";
-import { resolveMapbiomasClassCodeFromRgb } from "@/lib/mapbiomas-colors";
-import type { PmtilesZoomRange } from "@/lib/pmtiles-source";
 import { normalizeGroupValue } from "@/lib/vector-grouping";
 import type { VectorLayerState } from "@/hooks/use-map-vector-layers";
-
-export type HoverPixelInfo = {
-  code: number | null;
-  red: number;
-  green: number;
-  blue: number;
-  alpha: number;
-  pixelX: number;
-  pixelY: number;
-  requestedZoom: number | null;
-  sourceZoom: number | null;
-};
-
-export type HoverAgbPixelInfo = {
-  rawValue: number;
-  scaledValue: number;
-  color: string;
-  pixelX: number;
-  pixelY: number;
-  requestedZoom: number | null;
-  sourceZoom: number | null;
-};
-
-export type HoverChmPixelInfo = {
-  rawValue: number;
-  scaledValue: number;
-  color: string;
-  pixelX: number;
-  pixelY: number;
-  requestedZoom: number | null;
-  sourceZoom: number | null;
-};
 
 export type HoveredVectorInfo = {
   layerName: string;
   groupingColumn: string | null;
   groupingValue: string;
+  placeLabel: string | null;
   pixelX: number;
   pixelY: number;
 };
+
+function readHoverPlaceLabel(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
 
 export type SelectedVectorInfo = {
   layerName: string;
   groupingColumn: string | null;
   groupingValue: string;
+  geometryType: string | null;
   geometry: OlGeometry | null;
   rawProperties: Record<string, unknown>;
   properties: Array<{ key: string; value: string }>;
@@ -80,11 +45,6 @@ export type SelectedVectorInfo = {
 
 type UseMapPointerInteractionsParams = {
   map: OLMap | null;
-  isLandcoverVisible: boolean;
-  isAgbVisible: boolean;
-  isChmVisible: boolean;
-  pmtilesLayer: TileLayer<XYZ> | null;
-  pmtilesZoomRange: PmtilesZoomRange | null;
   vectorLayers: Record<string, VectorLayerState>;
   isDrawingPolygon: boolean;
   hasPendingPolygonConfirm: boolean;
@@ -120,19 +80,11 @@ function getHoveredFeatureAreaMetrics(
 
 export function useMapPointerInteractions({
   map,
-  isLandcoverVisible,
-  isAgbVisible,
-  isChmVisible,
-  pmtilesLayer,
-  pmtilesZoomRange,
   vectorLayers,
   isDrawingPolygon,
   hasPendingPolygonConfirm,
   selectedVectorUidRef,
 }: UseMapPointerInteractionsParams) {
-  const [hoverPixelInfo, setHoverPixelInfo] = useState<HoverPixelInfo | null>(null);
-  const [hoverAgbPixelInfo, setHoverAgbPixelInfo] = useState<HoverAgbPixelInfo | null>(null);
-  const [hoverChmPixelInfo, setHoverChmPixelInfo] = useState<HoverChmPixelInfo | null>(null);
   const [hoveredVectorInfo, setHoveredVectorInfo] = useState<HoveredVectorInfo | null>(null);
   const [selectedVectorInfo, setSelectedVectorInfo] = useState<SelectedVectorInfo | null>(null);
 
@@ -140,21 +92,6 @@ export function useMapPointerInteractions({
     if (!map) {
       return;
     }
-
-    let hoverUpdateFrameId: number | null = null;
-    let latestPixel: [number, number] | null = null;
-
-    const readPixelComponent = (
-      pixelData: Uint8ClampedArray | Uint8Array | Float32Array | DataView,
-      index: number,
-      fallback: number,
-    ): number => {
-      if (pixelData instanceof DataView) {
-        return pixelData.byteLength > index ? pixelData.getUint8(index) : fallback;
-      }
-
-      return pixelData.length > index ? Number(pixelData[index]) : fallback;
-    };
 
     const handlePointerMove = (
       event: MapBrowserEvent<PointerEvent | KeyboardEvent | WheelEvent>,
@@ -193,210 +130,21 @@ export function useMapPointerInteractions({
           layerName: hoveredVectorResult.layerName,
           groupingColumn,
           groupingValue,
+          placeLabel: readHoverPlaceLabel(hoveredVectorResult.feature.get("place")),
           pixelX,
           pixelY,
         });
       } else {
         setHoveredVectorInfo(null);
       }
-
-      if (event.dragging || (!isLandcoverVisible && !isAgbVisible && !isChmVisible) || !pmtilesLayer) {
-        if (hoverUpdateFrameId !== null) {
-          window.cancelAnimationFrame(hoverUpdateFrameId);
-          hoverUpdateFrameId = null;
-        }
-
-        latestPixel = null;
-
-        setHoverPixelInfo(null);
-        setHoverAgbPixelInfo(null);
-        setHoverChmPixelInfo(null);
-        return;
-      }
-
-      latestPixel = [pixelX, pixelY];
-
-      setHoverPixelInfo((previous) => {
-        if (!previous) {
-          return previous;
-        }
-
-        if (previous.pixelX === pixelX && previous.pixelY === pixelY) {
-          return previous;
-        }
-
-        return {
-          ...previous,
-          pixelX,
-          pixelY,
-        };
-      });
-
-      if (hoverUpdateFrameId !== null) {
-        return;
-      }
-
-      hoverUpdateFrameId = window.requestAnimationFrame(() => {
-        hoverUpdateFrameId = null;
-
-        if (!latestPixel) {
-          return;
-        }
-
-        const [nextPixelX, nextPixelY] = latestPixel;
-
-        const pixelData = pmtilesLayer.getData([nextPixelX, nextPixelY]);
-        if (!pixelData || pixelData.byteLength === 0) {
-          setHoverPixelInfo(null);
-          setHoverAgbPixelInfo(null);
-          setHoverChmPixelInfo(null);
-          return;
-        }
-
-        const red = readPixelComponent(pixelData, 0, 0);
-        const green = readPixelComponent(pixelData, 1, red);
-        const blue = readPixelComponent(pixelData, 2, red);
-        const alpha = readPixelComponent(pixelData, 3, 255);
-
-        const viewZoom = map.getView().getZoom();
-        const requestedZoom = Number.isFinite(viewZoom) ? Math.round(viewZoom ?? 0) : null;
-        const sourceZoom =
-          requestedZoom === null || !pmtilesZoomRange
-            ? requestedZoom
-            : Math.max(
-                pmtilesZoomRange.minZoom,
-                Math.min(pmtilesZoomRange.maxZoom, requestedZoom),
-              );
-
-        if (isAgbVisible) {
-          if (alpha === 0 || red <= AGB_TRANSPARENT_RAW_THRESHOLD) {
-            setHoverAgbPixelInfo(null);
-            return;
-          }
-
-          const rawValue = red;
-          const scaledValue = rawValue / AGB_SCALE_FACTOR;
-          const color = getAgbDisplayColor(rawValue);
-
-          setHoverAgbPixelInfo((previous) => {
-            if (
-              previous &&
-              previous.rawValue === rawValue &&
-              previous.scaledValue === scaledValue &&
-              previous.color === color &&
-              previous.pixelX === nextPixelX &&
-              previous.pixelY === nextPixelY &&
-              previous.requestedZoom === requestedZoom &&
-              previous.sourceZoom === sourceZoom
-            ) {
-              return previous;
-            }
-
-            return {
-              rawValue,
-              scaledValue,
-              color,
-              pixelX: nextPixelX,
-              pixelY: nextPixelY,
-              requestedZoom,
-              sourceZoom,
-            };
-          });
-
-          setHoverPixelInfo(null);
-          setHoverChmPixelInfo(null);
-          return;
-        }
-
-        setHoverAgbPixelInfo(null);
-
-        if (isChmVisible) {
-          if (alpha === 0 || red <= CHM_TRANSPARENT_RAW_THRESHOLD) {
-            setHoverChmPixelInfo(null);
-            return;
-          }
-
-          const rawValue = red;
-          const scaledValue = rawValue / CHM_SCALE_FACTOR;
-          const color = getChmDisplayColor(rawValue);
-
-          setHoverChmPixelInfo((previous) => {
-            if (
-              previous &&
-              previous.rawValue === rawValue &&
-              previous.scaledValue === scaledValue &&
-              previous.color === color &&
-              previous.pixelX === nextPixelX &&
-              previous.pixelY === nextPixelY &&
-              previous.requestedZoom === requestedZoom &&
-              previous.sourceZoom === sourceZoom
-            ) {
-              return previous;
-            }
-
-            return {
-              rawValue,
-              scaledValue,
-              color,
-              pixelX: nextPixelX,
-              pixelY: nextPixelY,
-              requestedZoom,
-              sourceZoom,
-            };
-          });
-
-          setHoverPixelInfo(null);
-          return;
-        }
-
-        setHoverChmPixelInfo(null);
-
-        const code =
-          alpha === 0
-            ? null
-            : resolveMapbiomasClassCodeFromRgb(red, green, blue, alpha);
-
-        setHoverPixelInfo((previous) => {
-          if (
-            previous &&
-            previous.code === code &&
-            previous.red === red &&
-            previous.green === green &&
-            previous.blue === blue &&
-            previous.alpha === alpha &&
-            previous.pixelX === nextPixelX &&
-            previous.pixelY === nextPixelY &&
-            previous.requestedZoom === requestedZoom &&
-            previous.sourceZoom === sourceZoom
-          ) {
-            return previous;
-          }
-
-          return {
-            code,
-            red,
-            green,
-            blue,
-            alpha,
-            pixelX: nextPixelX,
-            pixelY: nextPixelY,
-            requestedZoom,
-            sourceZoom,
-          };
-        });
-      });
     };
 
     map.on("pointermove", handlePointerMove);
 
     return () => {
-      if (hoverUpdateFrameId !== null) {
-        window.cancelAnimationFrame(hoverUpdateFrameId);
-      }
-
       map.un("pointermove", handlePointerMove);
     };
-  }, [isAgbVisible, isChmVisible, isLandcoverVisible, map, pmtilesLayer, pmtilesZoomRange, vectorLayers]);
+  }, [map, vectorLayers]);
 
   useEffect(() => {
     if (!map || isDrawingPolygon || hasPendingPolygonConfirm) {
@@ -438,6 +186,7 @@ export function useMapPointerInteractions({
         selectedVectorResult.feature instanceof Feature
           ? selectedVectorResult.feature.getGeometry()?.clone() ?? null
           : null;
+      const geometryType = geometry?.getType() ?? null;
       const layerState = vectorLayers[selectedVectorResult.layerName];
       const allProps = selectedVectorResult.feature.getProperties() as Record<string, unknown>;
       const areaMetrics =
@@ -465,6 +214,7 @@ export function useMapPointerInteractions({
         layerName: selectedVectorResult.layerName,
         groupingColumn,
         groupingValue,
+        geometryType,
         geometry,
         rawProperties: allProps,
         properties: allProperties,
@@ -505,9 +255,6 @@ export function useMapPointerInteractions({
   }, [map, selectedVectorUidRef]);
 
   return {
-    hoverPixelInfo,
-    hoverAgbPixelInfo,
-    hoverChmPixelInfo,
     hoveredVectorInfo,
     selectedVectorInfo,
     clearHoveredForLayer,
