@@ -8,6 +8,8 @@ tags:
 - highcarbonstock
 ---
 
+
+
 # Dataset Card for HCSA Forest Plot Data 2023
 
 This dataset contains information on forest field plot inventory data collected using the High Carbon Stock Approach (HCSA) methodology. The data serves as validation and training data for large-scale indicative HCS forest maps produced with the [HCSA Largescale Mapping Framework](https://highcarbonstock.org/wp-content/uploads/2023/02/HCSA-Large-Scale-MAP-FWK-Procedure-1.pdf), as part of a project funded by the GIZ Fair Forward Initiative. It encompasses various parameters pertaining to land cover, carbon content, tree characteristics, and biomass calculations.
