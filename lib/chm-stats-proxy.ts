@@ -2,7 +2,7 @@ import http from "node:http";
 import https from "node:https";
 
 export const DEFAULT_CHM_STATS_UPSTREAM_JOBS_URL =
-  "http://127.0.0.1:8000/api/v1/chm/stats/jobs";
+  "http://178.104.153.106/api/v1/chm/stats/jobs";
 export const DEFAULT_CHM_STATS_PROXY_TIMEOUT_MS = 300_000;
 
 export type UpstreamProxyResponse = {
@@ -40,7 +40,8 @@ function resolveChmStatsConfiguredUpstreamUrl(): string {
     return explicitUrl;
   }
 
-  const target = (process.env.CHM_STATS_TARGET ?? "local").trim().toLowerCase();
+  const defaultTarget = process.env.NODE_ENV === "production" ? "remote" : "local";
+  const target = (process.env.CHM_STATS_TARGET ?? defaultTarget).trim().toLowerCase();
   const localUrl = process.env.CHM_STATS_LOCAL_API_URL?.trim();
   const remoteUrl = process.env.CHM_STATS_REMOTE_API_URL?.trim();
 
