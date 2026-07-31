@@ -8,7 +8,7 @@ type WorkshopRegionsResponse = {
 export async function GET(): Promise<Response> {
   return Response.json({ regions: [...WORKSHOP_REGION_FILES] } satisfies WorkshopRegionsResponse, {
     headers: {
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": "no-store",
     },
   });
 }

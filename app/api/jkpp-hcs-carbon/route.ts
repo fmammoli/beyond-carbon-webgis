@@ -8,7 +8,7 @@ type JkppHcsCarbonResponse = {
 export async function GET(): Promise<Response> {
   return Response.json({ files: [...JKPP_HCS_CARBON_FILES] } satisfies JkppHcsCarbonResponse, {
     headers: {
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": "no-store",
     },
   });
 }

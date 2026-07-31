@@ -8,7 +8,7 @@ type ConcessionsResponse = {
 export async function GET(): Promise<Response> {
   return Response.json({ concessions: [...CONCESSION_FILES] } satisfies ConcessionsResponse, {
     headers: {
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": "no-store",
     },
   });
 }

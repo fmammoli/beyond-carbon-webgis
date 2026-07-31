@@ -83,6 +83,7 @@ const WORKSHOP_VECTOR_Z_INDEX = 2000;
 const CONCESSION_VECTOR_Z_INDEX = 2000;
 const WORKSHOP_DEFAULT_FILL_OPACITY = 0;
 const CONCESSION_DEFAULT_FILL_OPACITY = 0.12;
+const LAST_BOUNDARY_EXTENT_STORAGE_KEY = "bc:last-boundary-extent:v1";
 
 const BUILT_IN_VECTOR_LAYER_COLORS = [
   "#0f766e",
@@ -481,6 +482,7 @@ export default function MapContainer() {
   const selectedVectorUidRef = useRef<string | null>(null);
   const geojsonFormatRef = useRef(new GeoJSON());
   const hasLoadedWorkshopRegionsRef = useRef(false);
+  const hasRestoredBoundaryExtentRef = useRef(false);
   const landcoverStatsJob = useLandcoverStatsJob({
     baseUrl: process.env.NEXT_PUBLIC_LANDCOVER_STATS_API_BASE_URL,
     apiKey: process.env.NEXT_PUBLIC_LANDCOVER_STATS_API_KEY,
@@ -586,6 +588,52 @@ export default function MapContainer() {
 
     mapContext.map.getView().fit(extent, {
       duration: 500,
+      maxZoom,
+      padding,
+    });
+
+    try {
+      localStorage.setItem(LAST_BOUNDARY_EXTENT_STORAGE_KEY, JSON.stringify(extent));
+    } catch {
+      // Ignore storage failures (private mode/quota) and continue map interaction.
+    }
+  }, [mapContext.map]);
+
+  useEffect(() => {
+    if (!mapContext.map || hasRestoredBoundaryExtentRef.current) {
+      return;
+    }
+
+    hasRestoredBoundaryExtentRef.current = true;
+
+    let parsedExtent: unknown;
+    try {
+      const rawExtent = localStorage.getItem(LAST_BOUNDARY_EXTENT_STORAGE_KEY);
+      if (!rawExtent) {
+        return;
+      }
+      parsedExtent = JSON.parse(rawExtent);
+    } catch {
+      return;
+    }
+
+    if (!Array.isArray(parsedExtent) || parsedExtent.length !== 4) {
+      return;
+    }
+
+    const extent = parsedExtent.map((value) => Number(value));
+    const isValidExtent = extent.every((value) => Number.isFinite(value));
+    const hasArea = extent[0] < extent[2] && extent[1] < extent[3];
+    if (!isValidExtent || !hasArea) {
+      return;
+    }
+
+    const isDesktop = window.matchMedia("(min-width: 768px)").matches;
+    const padding = isDesktop ? [36, 40, 36, 320] : [120, 16, 104, 16];
+    const maxZoom = isDesktop ? 15 : 14;
+
+    mapContext.map.getView().fit(extent as Extent, {
+      duration: 0,
       maxZoom,
       padding,
     });
@@ -862,7 +910,7 @@ export default function MapContainer() {
           }
 
           const encodedName = encodeURIComponent(regionFileName);
-          const regionResponse = await fetch(`/workshop-regions/${encodedName}`, { cache: "force-cache" });
+          const regionResponse = await fetch(`/workshop-regions/${encodedName}`, { cache: "no-store" });
           if (!regionResponse.ok) {
             continue;
           }
@@ -920,7 +968,7 @@ export default function MapContainer() {
         }
 
         const encodedName = encodeURIComponent(builtInLayer.fileName);
-        const layerResponse = await fetch(`${builtInLayer.assetPath}/${encodedName}`, { cache: "force-cache" });
+        const layerResponse = await fetch(`${builtInLayer.assetPath}/${encodedName}`, { cache: "no-store" });
         if (!layerResponse.ok) {
           continue;
         }
