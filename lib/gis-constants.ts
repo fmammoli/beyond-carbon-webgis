@@ -24,6 +24,8 @@ export const DEFAULT_R2_AGB_PMTILES_BASE_URL =
 export const DEFAULT_CHM_OPACITY = 0.75;
 export const DEFAULT_R2_CHM_PMTILES_URL =
 	"https://pub-b35b693f4e7a4112af656d6983f8adc2.r2.dev/chm-pmtiles/chm-indonesia.pmtiles";
+export const DEFAULT_R2_CHM_KETAPANG_PMTILES_URL =
+	"https://pub-b35b693f4e7a4112af656d6983f8adc2.r2.dev/chm_pmtiles/ketapang_chm.pmtiles";
 
 export const CHM_MAX_OVERZOOM_DELTA = 16;
 

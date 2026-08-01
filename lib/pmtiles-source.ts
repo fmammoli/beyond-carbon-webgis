@@ -13,6 +13,7 @@ import {
 } from "@/lib/gis-constants";
 import {
   getChmDisplayRgb,
+  chmLegend,
 } from "@/lib/chm-legend";
 
 export type PmtilesRenderMode = "passthrough" | "raw-codes" | "chm";
@@ -33,6 +34,8 @@ const BLACK_TRANSPARENCY_THRESHOLD = 8;
 const WHITE_TRANSPARENCY_THRESHOLD = 240;
 const BRIGHT_BACKGROUND_MIN_CHANNEL = 220;
 const BRIGHT_BACKGROUND_MAX_CHROMA_DELTA = 24;
+const CHM_GRAYSCALE_RATIO_THRESHOLD = 0.95;
+const CHM_HIGH_RANGE_THRESHOLD = 40;
 
 const archiveCache = new Map<string, PMTiles>();
 export type PmtilesZoomRange = {
@@ -295,10 +298,47 @@ async function createStyledTileObjectUrl(
   if (renderMode === "chm") {
     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
     const pixels = imageData.data;
+    const legendMax = chmLegend.breaks[chmLegend.breaks.length - 1] ?? 30;
+
+    let opaquePixelCount = 0;
+    let grayscalePixelCount = 0;
+    let maxRedChannelValue = 0;
 
     for (let index = 0; index < pixels.length; index += 4) {
+      const alpha = pixels[index + 3];
+      if (alpha === 0) {
+        continue;
+      }
+
+      opaquePixelCount += 1;
       const red = pixels[index];
-      const [mappedRed, mappedGreen, mappedBlue] = getChmDisplayRgb(red);
+      const green = pixels[index + 1];
+      const blue = pixels[index + 2];
+      maxRedChannelValue = Math.max(maxRedChannelValue, red);
+
+      if (Math.abs(red - green) <= 1 && Math.abs(red - blue) <= 1) {
+        grayscalePixelCount += 1;
+      }
+    }
+
+    const isSingleBandGrayscale =
+      opaquePixelCount > 0
+      && grayscalePixelCount / opaquePixelCount >= CHM_GRAYSCALE_RATIO_THRESHOLD;
+    const requiresHighRangeScaling = maxRedChannelValue > CHM_HIGH_RANGE_THRESHOLD;
+
+    for (let index = 0; index < pixels.length; index += 4) {
+      if (pixels[index + 3] === 0) {
+        continue;
+      }
+
+      const red = pixels[index];
+      // Some CHM archives encode heights as 8-bit grayscale (0..255), while
+      // others already store low-range values close to legend units. Detect
+      // grayscale tiles and only rescale when values clearly exceed legend range.
+      const normalizedValue = isSingleBandGrayscale && requiresHighRangeScaling
+        ? (red / 255) * legendMax
+        : red;
+      const [mappedRed, mappedGreen, mappedBlue] = getChmDisplayRgb(normalizedValue);
       pixels[index] = mappedRed;
       pixels[index + 1] = mappedGreen;
       pixels[index + 2] = mappedBlue;

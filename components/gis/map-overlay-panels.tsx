@@ -26,8 +26,10 @@ type MapTopPanelsProps = {
   landcoverOpacity: number;
   isAgbVisible: boolean;
   agbOpacity: number;
-  isChmVisible: boolean;
-  chmOpacity: number;
+  isChmIndonesiaVisible: boolean;
+  chmIndonesiaOpacity: number;
+  isChmKetapangVisible: boolean;
+  chmKetapangOpacity: number;
   vectorLayerItems: MapControlVectorLayerItem[];
   activeLegendLayers: ActiveLegendLayer[];
   isLegendOpen: boolean;
@@ -37,8 +39,10 @@ type MapTopPanelsProps = {
   onLandcoverOpacityChange: (opacity: number) => void;
   onAgbChange: (visible: boolean) => void;
   onAgbOpacityChange: (opacity: number) => void;
-  onChmChange: (visible: boolean) => void;
-  onChmOpacityChange: (opacity: number) => void;
+  onChmIndonesiaChange: (visible: boolean) => void;
+  onChmIndonesiaOpacityChange: (opacity: number) => void;
+  onChmKetapangChange: (visible: boolean) => void;
+  onChmKetapangOpacityChange: (opacity: number) => void;
   onVectorLayerChange: (fileName: string, visible: boolean) => void;
   onVectorLayerOpacityChange: (fileName: string, opacity: number) => void;
   onLegendOpenChange: (open: boolean) => void;
@@ -190,8 +194,10 @@ export function MapTopPanels({
   landcoverOpacity,
   isAgbVisible,
   agbOpacity,
-  isChmVisible,
-  chmOpacity,
+  isChmIndonesiaVisible,
+  chmIndonesiaOpacity,
+  isChmKetapangVisible,
+  chmKetapangOpacity,
   vectorLayerItems,
   activeLegendLayers,
   isLegendOpen,
@@ -201,8 +207,10 @@ export function MapTopPanels({
   onLandcoverOpacityChange,
   onAgbChange,
   onAgbOpacityChange,
-  onChmChange,
-  onChmOpacityChange,
+  onChmIndonesiaChange,
+  onChmIndonesiaOpacityChange,
+  onChmKetapangChange,
+  onChmKetapangOpacityChange,
   onVectorLayerChange,
   onVectorLayerOpacityChange,
   onLegendOpenChange,
@@ -263,8 +271,10 @@ export function MapTopPanels({
                       landcoverOpacity={landcoverOpacity}
                       isAgbVisible={isAgbVisible}
                       agbOpacity={agbOpacity}
-                      isChmVisible={isChmVisible}
-                      chmOpacity={chmOpacity}
+                      isChmIndonesiaVisible={isChmIndonesiaVisible}
+                      chmIndonesiaOpacity={chmIndonesiaOpacity}
+                      isChmKetapangVisible={isChmKetapangVisible}
+                      chmKetapangOpacity={chmKetapangOpacity}
                       vectorLayerItems={vectorLayerItems}
                       onSatelliteChange={onSatelliteChange}
                       onBoundariesAndPlacesChange={onBoundariesAndPlacesChange}
@@ -272,8 +282,10 @@ export function MapTopPanels({
                       onLandcoverOpacityChange={onLandcoverOpacityChange}
                       onAgbChange={onAgbChange}
                       onAgbOpacityChange={onAgbOpacityChange}
-                      onChmChange={onChmChange}
-                      onChmOpacityChange={onChmOpacityChange}
+                      onChmIndonesiaChange={onChmIndonesiaChange}
+                      onChmIndonesiaOpacityChange={onChmIndonesiaOpacityChange}
+                      onChmKetapangChange={onChmKetapangChange}
+                      onChmKetapangOpacityChange={onChmKetapangOpacityChange}
                       onVectorLayerChange={onVectorLayerChange}
                       onVectorLayerOpacityChange={onVectorLayerOpacityChange}
                       embedded
@@ -308,8 +320,10 @@ export function MapTopPanels({
                   landcoverOpacity={landcoverOpacity}
                   isAgbVisible={isAgbVisible}
                   agbOpacity={agbOpacity}
-                  isChmVisible={isChmVisible}
-                  chmOpacity={chmOpacity}
+                  isChmIndonesiaVisible={isChmIndonesiaVisible}
+                  chmIndonesiaOpacity={chmIndonesiaOpacity}
+                  isChmKetapangVisible={isChmKetapangVisible}
+                  chmKetapangOpacity={chmKetapangOpacity}
                   vectorLayerItems={vectorLayerItems}
                   onSatelliteChange={onSatelliteChange}
                   onBoundariesAndPlacesChange={onBoundariesAndPlacesChange}
@@ -317,8 +331,10 @@ export function MapTopPanels({
                   onLandcoverOpacityChange={onLandcoverOpacityChange}
                   onAgbChange={onAgbChange}
                   onAgbOpacityChange={onAgbOpacityChange}
-                  onChmChange={onChmChange}
-                  onChmOpacityChange={onChmOpacityChange}
+                  onChmIndonesiaChange={onChmIndonesiaChange}
+                  onChmIndonesiaOpacityChange={onChmIndonesiaOpacityChange}
+                  onChmKetapangChange={onChmKetapangChange}
+                  onChmKetapangOpacityChange={onChmKetapangOpacityChange}
                   onVectorLayerChange={onVectorLayerChange}
                   onVectorLayerOpacityChange={onVectorLayerOpacityChange}
                   embedded

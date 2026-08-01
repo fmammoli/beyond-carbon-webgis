@@ -19,8 +19,10 @@ type MapControlsProps = {
   landcoverOpacity: number;
   isAgbVisible: boolean;
   agbOpacity: number;
-  isChmVisible: boolean;
-  chmOpacity: number;
+  isChmIndonesiaVisible: boolean;
+  chmIndonesiaOpacity: number;
+  isChmKetapangVisible: boolean;
+  chmKetapangOpacity: number;
   vectorLayerItems: MapControlVectorLayerItem[];
   onSatelliteChange: (visible: boolean) => void;
   onBoundariesAndPlacesChange: (visible: boolean) => void;
@@ -28,8 +30,10 @@ type MapControlsProps = {
   onLandcoverOpacityChange: (opacity: number) => void;
   onAgbChange: (visible: boolean) => void;
   onAgbOpacityChange: (opacity: number) => void;
-  onChmChange: (visible: boolean) => void;
-  onChmOpacityChange: (opacity: number) => void;
+  onChmIndonesiaChange: (visible: boolean) => void;
+  onChmIndonesiaOpacityChange: (opacity: number) => void;
+  onChmKetapangChange: (visible: boolean) => void;
+  onChmKetapangOpacityChange: (opacity: number) => void;
   onVectorLayerChange: (fileName: string, visible: boolean) => void;
   onVectorLayerOpacityChange: (fileName: string, opacity: number) => void;
   embedded?: boolean;
@@ -125,8 +129,10 @@ export function MapControls({
   landcoverOpacity,
   isAgbVisible,
   agbOpacity,
-  isChmVisible,
-  chmOpacity,
+  isChmIndonesiaVisible,
+  chmIndonesiaOpacity,
+  isChmKetapangVisible,
+  chmKetapangOpacity,
   vectorLayerItems,
   onSatelliteChange,
   onBoundariesAndPlacesChange,
@@ -134,8 +140,10 @@ export function MapControls({
   onLandcoverOpacityChange,
   onAgbChange,
   onAgbOpacityChange,
-  onChmChange,
-  onChmOpacityChange,
+  onChmIndonesiaChange,
+  onChmIndonesiaOpacityChange,
+  onChmKetapangChange,
+  onChmKetapangOpacityChange,
   onVectorLayerChange,
   onVectorLayerOpacityChange,
   embedded = false,
@@ -178,13 +186,23 @@ export function MapControls({
         />
         <ToggleOpacityRow
           icon={<Layers className="size-4" />}
-          label="Canopy Height Model Layer"
-          checked={isChmVisible}
-          opacity={chmOpacity}
-          onCheckedChange={onChmChange}
-          onOpacityChange={onChmOpacityChange}
-          switchAriaLabel="Toggle canopy height model layer"
-          sliderAriaLabel="Set canopy height model opacity"
+          label="Canopy Height Model (Indonesia)"
+          checked={isChmIndonesiaVisible}
+          opacity={chmIndonesiaOpacity}
+          onCheckedChange={onChmIndonesiaChange}
+          onOpacityChange={onChmIndonesiaOpacityChange}
+          switchAriaLabel="Toggle canopy height model Indonesia layer"
+          sliderAriaLabel="Set canopy height model Indonesia opacity"
+        />
+        <ToggleOpacityRow
+          icon={<Layers className="size-4" />}
+          label="Canopy Height Model (Ketapang)"
+          checked={isChmKetapangVisible}
+          opacity={chmKetapangOpacity}
+          onCheckedChange={onChmKetapangChange}
+          onOpacityChange={onChmKetapangOpacityChange}
+          switchAriaLabel="Toggle canopy height model Ketapang layer"
+          sliderAriaLabel="Set canopy height model Ketapang opacity"
         />
         {vectorLayerItems.map((item) => (
           <ToggleOpacityRow
@@ -203,7 +221,7 @@ export function MapControls({
   );
 
   if (embedded) {
-    return <div className="min-h-0 flex-1 overflow-y-auto pr-1">{controlsContent}</div>;
+    return <div className="h-full min-h-0 overflow-y-auto pr-1">{controlsContent}</div>;
   }
 
   return (

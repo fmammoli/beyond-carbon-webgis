@@ -16,6 +16,7 @@ import {
   DEFAULT_AGB_OPACITY,
   DEFAULT_CHM_OPACITY,
   DEFAULT_R2_AGB_PMTILES_BASE_URL,
+  DEFAULT_R2_CHM_KETAPANG_PMTILES_URL,
   DEFAULT_R2_CHM_PMTILES_URL,
   DEFAULT_LANDCOVER_OPACITY,
   DEFAULT_R2_PMTILES_BASE_URL,
@@ -458,8 +459,10 @@ export default function MapContainer() {
   const [landcoverOpacity, setLandcoverOpacity] = useState(DEFAULT_LANDCOVER_OPACITY);
   const [isAgbVisible, setIsAgbVisible] = useState(false);
   const [agbOpacity, setAgbOpacity] = useState(DEFAULT_AGB_OPACITY);
-  const [isChmVisible, setIsChmVisible] = useState(false);
-  const [chmOpacity, setChmOpacity] = useState(DEFAULT_CHM_OPACITY);
+  const [isChmIndonesiaVisible, setIsChmIndonesiaVisible] = useState(false);
+  const [chmIndonesiaOpacity, setChmIndonesiaOpacity] = useState(DEFAULT_CHM_OPACITY);
+  const [isChmKetapangVisible, setIsChmKetapangVisible] = useState(false);
+  const [chmKetapangOpacity, setChmKetapangOpacity] = useState(DEFAULT_CHM_OPACITY);
   const [isSatelliteVisible, setIsSatelliteVisible] = useState(true);
   const [isBoundariesAndPlacesVisible, setIsBoundariesAndPlacesVisible] = useState(true);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
@@ -506,14 +509,16 @@ export default function MapContainer() {
     process.env.NEXT_PUBLIC_R2_PMTILES_BASE_URL ?? DEFAULT_R2_PMTILES_BASE_URL;
   const agbPmtilesBaseUrl =
     process.env.NEXT_PUBLIC_R2_AGB_PMTILES_BASE_URL ?? DEFAULT_R2_AGB_PMTILES_BASE_URL;
-  const chmPmtilesUrl =
+  const chmIndonesiaPmtilesUrl =
     process.env.NEXT_PUBLIC_R2_CHM_PMTILES_URL ?? DEFAULT_R2_CHM_PMTILES_URL;
+  const chmKetapangPmtilesUrl =
+    process.env.NEXT_PUBLIC_R2_CHM_KETAPANG_PMTILES_URL ?? DEFAULT_R2_CHM_KETAPANG_PMTILES_URL;
   const missingPmtilesUrl = !pmtilesBaseUrl;
   const activeRasterLayer = isLandcoverVisible
     ? "landcover"
     : isAgbVisible
       ? "agb"
-      : isChmVisible
+      : (isChmIndonesiaVisible || isChmKetapangVisible)
         ? "chm"
         : null;
   const activeTimelineMinYear =
@@ -529,15 +534,19 @@ export default function MapContainer() {
     maxYear: AGB_MAX_YEAR,
     fileSuffix: AGB_FILE_SUFFIX,
   }), []);
-  const chmArchiveOptions = useMemo<PmtilesArchiveOptions>(() => ({
-    staticArchiveUrl: chmPmtilesUrl,
-  }), [chmPmtilesUrl]);
+  const chmIndonesiaArchiveOptions = useMemo<PmtilesArchiveOptions>(() => ({
+    staticArchiveUrl: chmIndonesiaPmtilesUrl,
+  }), [chmIndonesiaPmtilesUrl]);
+  const chmKetapangArchiveOptions = useMemo<PmtilesArchiveOptions>(() => ({
+    staticArchiveUrl: chmKetapangPmtilesUrl,
+  }), [chmKetapangPmtilesUrl]);
 
   const onLandcoverVisibilityChange = useCallback((visible: boolean) => {
     setIsLandcoverVisible(visible);
     if (visible) {
       setIsAgbVisible(false);
-      setIsChmVisible(false);
+      setIsChmIndonesiaVisible(false);
+      setIsChmKetapangVisible(false);
       setYear((previousYear) => Math.max(MIN_YEAR, Math.min(MAX_YEAR, previousYear)));
       return;
     }
@@ -547,14 +556,23 @@ export default function MapContainer() {
     setIsAgbVisible(visible);
     if (visible) {
       setIsLandcoverVisible(false);
-      setIsChmVisible(false);
+      setIsChmIndonesiaVisible(false);
+      setIsChmKetapangVisible(false);
       setYear((previousYear) => Math.max(AGB_MIN_YEAR, Math.min(AGB_MAX_YEAR, previousYear)));
       return;
     }
   }, []);
 
-  const onChmVisibilityChange = useCallback((visible: boolean) => {
-    setIsChmVisible(visible);
+  const onChmIndonesiaVisibilityChange = useCallback((visible: boolean) => {
+    setIsChmIndonesiaVisible(visible);
+    if (visible) {
+      setIsLandcoverVisible(false);
+      setIsAgbVisible(false);
+    }
+  }, []);
+
+  const onChmKetapangVisibilityChange = useCallback((visible: boolean) => {
+    setIsChmKetapangVisible(visible);
     if (visible) {
       setIsLandcoverVisible(false);
       setIsAgbVisible(false);
@@ -656,7 +674,7 @@ export default function MapContainer() {
     selectedVectorUidRef,
     isLandcoverVisible,
     isAgbVisible,
-    isChmVisible,
+    isChmVisible: isChmIndonesiaVisible || isChmKetapangVisible,
   });
 
   const {
@@ -1523,15 +1541,30 @@ export default function MapContainer() {
         />
       ) : null}
 
-      {isChmVisible ? (
+      {isChmIndonesiaVisible ? (
         <PmtilesLayer
           map={mapContext.map}
           year={year}
           visible
-          opacity={chmOpacity}
+          opacity={chmIndonesiaOpacity}
           renderMode={chmRenderMode}
-          baseUrl={chmPmtilesUrl}
-          archiveOptions={chmArchiveOptions}
+          baseUrl={chmIndonesiaPmtilesUrl}
+          archiveOptions={chmIndonesiaArchiveOptions}
+          prefetchNeighbors={!isThreatMapGenerating}
+          onFrameLoadingChange={setIsFrameLoading}
+          onYearFrameReady={onThreatMapYearFrameReady}
+        />
+      ) : null}
+
+      {isChmKetapangVisible ? (
+        <PmtilesLayer
+          map={mapContext.map}
+          year={year}
+          visible
+          opacity={chmKetapangOpacity}
+          renderMode={chmRenderMode}
+          baseUrl={chmKetapangPmtilesUrl}
+          archiveOptions={chmKetapangArchiveOptions}
           prefetchNeighbors={!isThreatMapGenerating}
           onFrameLoadingChange={setIsFrameLoading}
           onYearFrameReady={onThreatMapYearFrameReady}
@@ -1554,8 +1587,10 @@ export default function MapContainer() {
             landcoverOpacity={landcoverOpacity}
             isAgbVisible={isAgbVisible}
             agbOpacity={agbOpacity}
-            isChmVisible={isChmVisible}
-            chmOpacity={chmOpacity}
+            isChmIndonesiaVisible={isChmIndonesiaVisible}
+            chmIndonesiaOpacity={chmIndonesiaOpacity}
+            isChmKetapangVisible={isChmKetapangVisible}
+            chmKetapangOpacity={chmKetapangOpacity}
             vectorLayerItems={mapControlVectorLayerItems}
             activeLegendLayers={activeLegendLayers}
             isLegendOpen={isLegendOpen}
@@ -1565,8 +1600,10 @@ export default function MapContainer() {
             onLandcoverOpacityChange={setLandcoverOpacity}
             onAgbChange={onAgbVisibilityChange}
             onAgbOpacityChange={setAgbOpacity}
-            onChmChange={onChmVisibilityChange}
-            onChmOpacityChange={setChmOpacity}
+            onChmIndonesiaChange={onChmIndonesiaVisibilityChange}
+            onChmIndonesiaOpacityChange={setChmIndonesiaOpacity}
+            onChmKetapangChange={onChmKetapangVisibilityChange}
+            onChmKetapangOpacityChange={setChmKetapangOpacity}
             onVectorLayerChange={onVectorLayerVisibilityChange}
             onVectorLayerOpacityChange={onVectorLayerOpacityChange}
             onLegendOpenChange={setIsLegendOpen}
