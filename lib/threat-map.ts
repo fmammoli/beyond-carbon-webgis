@@ -166,12 +166,7 @@ function resolveThreatMapBaseUrl(baseUrl?: string): string {
 }
 
 function resolveThreatMapApiKey(baseUrl?: string, providedApiKey?: string): string | null {
-  const apiKey = (
-    providedApiKey
-    ?? process.env.NEXT_PUBLIC_THREAT_MAP_API_KEY
-    ?? process.env.NEXT_PUBLIC_API_KEY
-    ?? ""
-  ).trim();
+  const apiKey = (providedApiKey ?? process.env.NEXT_PUBLIC_UPSTREAM_API_KEY ?? process.env.UPSTREAM_API_KEY ?? "").trim();
 
   if (apiKey) {
     return apiKey;

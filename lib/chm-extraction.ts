@@ -105,7 +105,7 @@ function isLocalDevBaseUrl(baseUrl: string): boolean {
 }
 
 function resolveChmApiKey(baseUrl?: string, providedApiKey?: string): string | null {
-  const apiKey = (providedApiKey ?? process.env.NEXT_PUBLIC_CHM_API_KEY ?? "").trim();
+  const apiKey = (providedApiKey ?? process.env.UPSTREAM_API_KEY ?? "").trim();
   if (apiKey) {
     return apiKey;
   }

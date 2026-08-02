@@ -2,7 +2,7 @@ import http from "node:http";
 import https from "node:https";
 
 export const DEFAULT_AGB_STATS_UPSTREAM_JOBS_URL =
-  "http://178.104.153.106/api/v1/ctrees/agb/stats/jobs";
+  "http://178.104.153.106/api/v1/agb/stats/jobs";
 export const DEFAULT_AGB_STATS_PROXY_TIMEOUT_MS = 300_000;
 
 export type UpstreamProxyResponse = {
@@ -11,16 +11,29 @@ export type UpstreamProxyResponse = {
   body: Buffer;
 };
 
+function getApiMode(): "local" | "remote" {
+  return (process.env.API_MODE ?? "local").trim().toLowerCase() === "remote" ? "remote" : "local";
+}
+
+function resolveApiBaseUrl(): string {
+  const mode = getApiMode();
+  const localBaseUrl = process.env.API_BASE_URL_LOCAL?.trim() ?? "http://127.0.0.1:8000";
+  const remoteBaseUrl = process.env.API_BASE_URL_REMOTE?.trim() ?? "http://178.104.154.106";
+  return mode === "remote" ? remoteBaseUrl : localBaseUrl;
+}
+
+function resolveEndpoint(path: string): string {
+  const baseUrl = resolveApiBaseUrl();
+  const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${normalizedBaseUrl}${normalizedPath}`;
+}
+
 export function getAgbStatsApiKey(): string | null {
-  return (
-    process.env.LANDCOVER_STATS_API_KEY ??
-    process.env.CHM_STATS_API_KEY ??
-    process.env.CHM_API_KEY ??
-    process.env.CANOPY_API_KEY ??
-    process.env.AGB_STATS_API_KEY ??
-    process.env.AGB_API_KEY ??
-    null
-  );
+  const mode = getApiMode();
+  const localApiKey = process.env.LOCAL_API_KEY?.trim() ?? "chm_beyond_carbon_workshop";
+  const remoteApiKey = process.env.REMOTE_API_KEY?.trim() ?? "0XYnNKOkn/INu9CNtKPwATKoL1knq3IQgl6w+MIfxUQ=";
+  return mode === "remote" ? remoteApiKey : localApiKey;
 }
 
 export function getAgbStatsUpstreamHostHeader(): string | undefined {
@@ -36,35 +49,8 @@ export function getAgbStatsProxyTimeoutMs(): number {
 }
 
 function resolveAgbStatsConfiguredUpstreamUrl(): string {
-  const explicitUrl =
-    process.env.AGB_STATS_API_URL ?? process.env.AGB_STATS_API_BASE_URL;
-
-  if (explicitUrl) {
-    return explicitUrl;
-  }
-
-  const defaultTarget = process.env.NODE_ENV === "production" ? "remote" : "local";
-  const target = (process.env.AGB_STATS_TARGET ?? defaultTarget).trim().toLowerCase();
-  const localUrl = process.env.AGB_STATS_LOCAL_API_URL?.trim();
-  const remoteUrl = process.env.AGB_STATS_REMOTE_API_URL?.trim();
-
-  if (target === "remote" && remoteUrl) {
-    return remoteUrl;
-  }
-
-  if (target === "local" && localUrl) {
-    return localUrl;
-  }
-
-  if (remoteUrl && !localUrl) {
-    return remoteUrl;
-  }
-
-  if (localUrl) {
-    return localUrl;
-  }
-
-  return DEFAULT_AGB_STATS_UPSTREAM_JOBS_URL;
+  const endpoint = process.env.AGB_STATS_ENDPOINT?.trim() ?? "/api/v1/agb/stats";
+  return resolveEndpoint(endpoint);
 }
 
 export function resolveAgbStatsJobsUpstreamUrl(): URL {
@@ -76,6 +62,11 @@ export function resolveAgbStatsJobsUpstreamUrl(): URL {
   }
 
   const trimmedPath = url.pathname.replace(/\/$/, "");
+  if (trimmedPath.endsWith("/agb/stats")) {
+    url.pathname = `${trimmedPath}/jobs`;
+    return url;
+  }
+
   if (trimmedPath.endsWith("/ctrees/agb/stats")) {
     url.pathname = `${trimmedPath}/jobs`;
     return url;

@@ -11,13 +11,29 @@ export type UpstreamProxyResponse = {
   body: Buffer;
 };
 
+function getApiMode(): "local" | "remote" {
+  return (process.env.API_MODE ?? "local").trim().toLowerCase() === "remote" ? "remote" : "local";
+}
+
+function resolveApiBaseUrl(): string {
+  const mode = getApiMode();
+  const localBaseUrl = process.env.API_BASE_URL_LOCAL?.trim() ?? "http://127.0.0.1:8000";
+  const remoteBaseUrl = process.env.API_BASE_URL_REMOTE?.trim() ?? "http://178.104.154.106";
+  return mode === "remote" ? remoteBaseUrl : localBaseUrl;
+}
+
+function resolveEndpoint(path: string): string {
+  const baseUrl = resolveApiBaseUrl();
+  const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${normalizedBaseUrl}${normalizedPath}`;
+}
+
 export function getChmStatsApiKey(): string | null {
-  return (
-    process.env.CHM_STATS_API_KEY ??
-    process.env.CHM_API_KEY ??
-    process.env.CANOPY_API_KEY ??
-    null
-  );
+  const mode = getApiMode();
+  const localApiKey = process.env.LOCAL_API_KEY?.trim() ?? "chm_beyond_carbon_workshop";
+  const remoteApiKey = process.env.REMOTE_API_KEY?.trim() ?? "0XYnNKOkn/INu9CNtKPwATKoL1knq3IQgl6w+MIfxUQ=";
+  return mode === "remote" ? remoteApiKey : localApiKey;
 }
 
 export function getChmStatsUpstreamHostHeader(): string | undefined {
@@ -33,35 +49,8 @@ export function getChmStatsProxyTimeoutMs(): number {
 }
 
 function resolveChmStatsConfiguredUpstreamUrl(): string {
-  const explicitUrl =
-    process.env.CHM_STATS_API_URL ?? process.env.CHM_STATS_API_BASE_URL;
-
-  if (explicitUrl) {
-    return explicitUrl;
-  }
-
-  const defaultTarget = process.env.NODE_ENV === "production" ? "remote" : "local";
-  const target = (process.env.CHM_STATS_TARGET ?? defaultTarget).trim().toLowerCase();
-  const localUrl = process.env.CHM_STATS_LOCAL_API_URL?.trim();
-  const remoteUrl = process.env.CHM_STATS_REMOTE_API_URL?.trim();
-
-  if (target === "remote" && remoteUrl) {
-    return remoteUrl;
-  }
-
-  if (target === "local" && localUrl) {
-    return localUrl;
-  }
-
-  if (remoteUrl && !localUrl) {
-    return remoteUrl;
-  }
-
-  if (localUrl) {
-    return localUrl;
-  }
-
-  return DEFAULT_CHM_STATS_UPSTREAM_JOBS_URL;
+  const endpoint = process.env.CHM_STATS_ENDPOINT?.trim() ?? "/api/v1/chm/stats";
+  return resolveEndpoint(endpoint);
 }
 
 export function resolveChmStatsJobsUpstreamUrl(): URL {

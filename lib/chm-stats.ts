@@ -452,7 +452,7 @@ function resolveChmStatsBaseUrl(baseUrl?: string): string {
 }
 
 function resolveChmStatsApiKey(baseUrl?: string, providedApiKey?: string): string | null {
-  const apiKey = (providedApiKey ?? process.env.NEXT_PUBLIC_CHM_STATS_API_KEY ?? "").trim();
+  const apiKey = (providedApiKey ?? process.env.NEXT_PUBLIC_UPSTREAM_API_KEY ?? process.env.UPSTREAM_API_KEY ?? "").trim();
   if (apiKey) {
     return apiKey;
   }

@@ -1,6 +1,6 @@
 import type { Feature, FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
 
-export const DEFAULT_AGB_STATS_API_BASE_URL = "/api/v1/ctrees/agb/stats";
+export const DEFAULT_AGB_STATS_API_BASE_URL = "/api/v1/agb/stats";
 export const DEFAULT_AGB_STATS_INITIAL_POLL_INTERVAL_MS = 1500;
 export const DEFAULT_AGB_STATS_MAX_DURATION_MS = 180_000;
 export const DEFAULT_AGB_STATS_MAX_RETRIES = 3;
@@ -410,14 +410,26 @@ function resolveAgbStatsBaseUrl(baseUrl?: string): string {
   return candidate.replace(/\/$/, "");
 }
 
+function buildAgbStatsCreateUrl(baseUrl?: string): string {
+  const resolvedBaseUrl = resolveAgbStatsBaseUrl(baseUrl);
+  if (resolvedBaseUrl.endsWith("/jobs")) {
+    return resolvedBaseUrl;
+  }
+
+  return `${resolvedBaseUrl}/jobs`;
+}
+
+function buildAgbStatsStatusUrl(jobId: string, baseUrl?: string): string {
+  const resolvedBaseUrl = resolveAgbStatsBaseUrl(baseUrl);
+  const normalizedBaseUrl = resolvedBaseUrl.endsWith("/jobs")
+    ? resolvedBaseUrl.replace(/\/jobs$/, "")
+    : resolvedBaseUrl;
+
+  return `${normalizedBaseUrl}/jobs/${encodeURIComponent(jobId)}`;
+}
+
 function resolveAgbStatsApiKey(baseUrl?: string, providedApiKey?: string): string | null {
-  const apiKey = (
-    providedApiKey
-    ?? process.env.NEXT_PUBLIC_LANDCOVER_STATS_API_KEY
-    ?? process.env.NEXT_PUBLIC_CHM_STATS_API_KEY
-    ?? process.env.NEXT_PUBLIC_AGB_STATS_API_KEY
-    ?? ""
-  ).trim();
+  const apiKey = (providedApiKey ?? process.env.NEXT_PUBLIC_UPSTREAM_API_KEY ?? process.env.UPSTREAM_API_KEY ?? "").trim();
   if (apiKey) {
     return apiKey;
   }

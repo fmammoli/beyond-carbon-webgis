@@ -7,20 +7,39 @@ function normalizeBaseUrl(value: string): string {
   return value.replace(/\/$/, "");
 }
 
-function resolveThreatMapUpstreamBaseUrl(): string {
-  const candidate = (
-    process.env.THREAT_MAP_API_URL
-    ?? process.env.THREAT_MAP_API_BASE_URL
-    ?? process.env.NEXT_PUBLIC_THREAT_MAP_API_BASE_URL
-    ?? DEFAULT_THREAT_MAP_UPSTREAM_BASE_URL
-  ).trim();
+function getApiMode(): "local" | "remote" {
+  return (process.env.API_MODE ?? "local").trim().toLowerCase() === "remote" ? "remote" : "local";
+}
 
-  return normalizeBaseUrl(candidate);
+function resolveApiBaseUrl(): string {
+  const mode = getApiMode();
+  const localBaseUrl = process.env.API_BASE_URL_LOCAL?.trim() ?? "http://127.0.0.1:8000";
+  const remoteBaseUrl = process.env.API_BASE_URL_REMOTE?.trim() ?? "http://178.104.154.106";
+  return mode === "remote" ? remoteBaseUrl : localBaseUrl;
+}
+
+function resolveThreatMapUpstreamBaseUrl(): string {
+  const baseUrl = resolveApiBaseUrl();
+  const parsed = new URL(baseUrl);
+  parsed.pathname = process.env.THREAT_MAP_ENDPOINT?.trim() ?? DEFAULT_THREAT_MAP_UPSTREAM_PATH_PREFIX;
+  return normalizeBaseUrl(parsed.toString());
 }
 
 function resolveThreatMapPath(pathname: string): string {
   const normalizedPath = pathname.startsWith("/") ? pathname : `/${pathname}`;
-  return `${resolveThreatMapUpstreamBaseUrl()}${DEFAULT_THREAT_MAP_UPSTREAM_PATH_PREFIX}${normalizedPath}`;
+  const baseUrl = resolveThreatMapUpstreamBaseUrl();
+  const parsed = new URL(baseUrl);
+  const normalizedBasePath = parsed.pathname.replace(/\/$/, "");
+
+  if (normalizedBasePath === "") {
+    parsed.pathname = `${DEFAULT_THREAT_MAP_UPSTREAM_PATH_PREFIX}${normalizedPath}`;
+  } else if (normalizedBasePath === DEFAULT_THREAT_MAP_UPSTREAM_PATH_PREFIX) {
+    parsed.pathname = `${normalizedBasePath}${normalizedPath}`;
+  } else {
+    parsed.pathname = `${normalizedBasePath}${DEFAULT_THREAT_MAP_UPSTREAM_PATH_PREFIX}${normalizedPath}`;
+  }
+
+  return parsed.toString().replace(/\/$/, "");
 }
 
 export function resolveThreatMapJobsUpstreamUrl(): string {
@@ -36,30 +55,10 @@ export function resolveThreatMapJobDownloadUpstreamUrl(jobId: string): string {
 }
 
 export function getThreatMapApiKey(): string | null {
-  const apiKey = (
-    process.env.THREAT_MAP_API_KEY
-    ?? process.env.LANDCOVER_STATS_API_KEY
-    ?? process.env.CHM_API_KEY
-    ?? process.env.CANOPY_API_KEY
-    ?? process.env.NEXT_PUBLIC_API_KEY
-    ?? process.env.NEXT_PUBLIC_THREAT_MAP_API_KEY
-    ?? ""
-  ).trim();
-
-  if (apiKey) {
-    return apiKey;
-  }
-
-  try {
-    const upstream = new URL(resolveThreatMapUpstreamBaseUrl());
-    if (upstream.hostname === "localhost" || upstream.hostname === "127.0.0.1") {
-      return DEFAULT_THREAT_MAP_LOCAL_DEV_API_KEY;
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
+  const mode = getApiMode();
+  const localApiKey = process.env.LOCAL_API_KEY?.trim() ?? DEFAULT_THREAT_MAP_LOCAL_DEV_API_KEY;
+  const remoteApiKey = process.env.REMOTE_API_KEY?.trim() ?? "0XYnNKOkn/INu9CNtKPwATKoL1knq3IQgl6w+MIfxUQ=";
+  return mode === "remote" ? remoteApiKey : localApiKey;
 }
 
 export function getThreatMapProxyTimeoutMs(): number {

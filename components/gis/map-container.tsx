@@ -65,6 +65,7 @@ import {
 import { type LandcoverStatsResult, formatLandcoverStatsError } from "@/lib/landcover-stats";
 import { type ChmStatsResult, formatChmStatsError } from "@/lib/chm-stats";
 import { type AgbStatsResult, formatAgbStatsError } from "@/lib/agb-stats";
+import { shouldUseAgbStatsResultForSelection, shouldUseStatsResultForSelection } from "@/lib/agb-stats-selection";
 import {
   type PmtilesArchiveOptions,
 } from "@/lib/pmtiles-source";
@@ -477,6 +478,8 @@ export default function MapContainer() {
   const [landcoverStatsResultCache, setLandcoverStatsResultCache] = useState<Record<string, LandcoverStatsResult>>({});
   const [chmStatsResultCache, setChmStatsResultCache] = useState<Record<string, ChmStatsResult>>({});
   const [agbStatsResultCache, setAgbStatsResultCache] = useState<Record<string, AgbStatsResult>>({});
+  const [landcoverStatsSelectionUid, setLandcoverStatsSelectionUid] = useState<string | null>(null);
+  const [chmStatsSelectionUid, setChmStatsSelectionUid] = useState<string | null>(null);
   const [agbStatsSelectionUid, setAgbStatsSelectionUid] = useState<string | null>(null);
   const [mapContext, setMapContext] = useState<MapContextState>({
     map: null,
@@ -488,18 +491,12 @@ export default function MapContainer() {
   const hasRestoredBoundaryExtentRef = useRef(false);
   const landcoverStatsJob = useLandcoverStatsJob({
     baseUrl: process.env.NEXT_PUBLIC_LANDCOVER_STATS_API_BASE_URL,
-    apiKey: process.env.NEXT_PUBLIC_LANDCOVER_STATS_API_KEY,
   });
   const chmStatsJob = useChmStatsJob({
     baseUrl: process.env.NEXT_PUBLIC_CHM_STATS_API_BASE_URL,
-    apiKey: process.env.NEXT_PUBLIC_CHM_STATS_API_KEY,
   });
   const agbStatsJob = useAgbStatsJob({
     baseUrl: process.env.NEXT_PUBLIC_AGB_STATS_API_BASE_URL,
-    apiKey:
-      process.env.NEXT_PUBLIC_LANDCOVER_STATS_API_KEY
-      ?? process.env.NEXT_PUBLIC_CHM_STATS_API_KEY
-      ?? process.env.NEXT_PUBLIC_AGB_STATS_API_KEY,
   });
   const resetLandcoverStatsJob = landcoverStatsJob.reset;
   const resetChmStatsJob = chmStatsJob.reset;
@@ -1144,7 +1141,9 @@ export default function MapContainer() {
     resetLandcoverStatsJob();
     resetChmStatsJob();
     resetAgbStatsJob();
-    setAgbStatsSelectionUid(null);
+    setLandcoverStatsSelectionUid(null);
+    setChmStatsSelectionUid(null);
+    setAgbStatsSelectionUid(selectedPolygonInfo?.selectionUid ?? null);
   }, [resetAgbStatsJob, resetChmStatsJob, resetLandcoverStatsJob, selectedPolygonInfo?.selectionUid]);
 
   useEffect(() => {
@@ -1204,6 +1203,10 @@ export default function MapContainer() {
       !selectedAgbStatsCacheKey
       || (agbStatsJob.status !== "succeeded" && agbStatsJob.status !== "partial_success")
       || !agbStatsJob.result
+      || !shouldUseAgbStatsResultForSelection(
+        agbStatsSelectionUid,
+        selectedPolygonInfo?.selectionUid ?? null,
+      )
     ) {
       return;
     }
@@ -1223,14 +1226,20 @@ export default function MapContainer() {
         [selectedAgbStatsCacheKey]: nextResult,
       };
     });
-  }, [agbStatsJob.result, agbStatsJob.status, selectedAgbStatsCacheKey]);
+  }, [agbStatsJob.result, agbStatsJob.status, agbStatsSelectionUid, selectedAgbStatsCacheKey, selectedPolygonInfo?.selectionUid]);
 
   const landcoverStatsJobView = useMemo(() => {
+    const shouldReuseLandcoverStats = shouldUseStatsResultForSelection(
+      landcoverStatsSelectionUid,
+      selectedPolygonInfo?.selectionUid ?? null,
+    );
+
     if (
       selectedPolygonInfo
       && landcoverStatsJob.status === "idle"
       && !landcoverStatsJob.error
       && cachedLandcoverStatsResult
+      && shouldReuseLandcoverStats
     ) {
       return {
         ...landcoverStatsJob,
@@ -1243,16 +1252,22 @@ export default function MapContainer() {
 
     return {
       ...landcoverStatsJob,
-      result: landcoverStatsJob.result ?? null,
+      result: shouldReuseLandcoverStats ? landcoverStatsJob.result ?? null : null,
     };
-  }, [cachedLandcoverStatsResult, landcoverStatsJob, selectedPolygonInfo]);
+  }, [cachedLandcoverStatsResult, landcoverStatsJob, landcoverStatsSelectionUid, selectedPolygonInfo]);
 
   const chmStatsJobView = useMemo(() => {
+    const shouldReuseChmStats = shouldUseStatsResultForSelection(
+      chmStatsSelectionUid,
+      selectedPolygonInfo?.selectionUid ?? null,
+    );
+
     if (
       selectedPolygonInfo
       && chmStatsJob.status === "idle"
       && !chmStatsJob.error
       && cachedChmStatsResult
+      && shouldReuseChmStats
     ) {
       return {
         ...chmStatsJob,
@@ -1265,19 +1280,22 @@ export default function MapContainer() {
 
     return {
       ...chmStatsJob,
-      result: chmStatsJob.result ?? null,
+      result: shouldReuseChmStats ? chmStatsJob.result ?? null : null,
     };
-  }, [cachedChmStatsResult, chmStatsJob, selectedPolygonInfo]);
+  }, [cachedChmStatsResult, chmStatsJob, chmStatsSelectionUid, selectedPolygonInfo]);
 
   const agbStatsJobView = useMemo(() => {
-    const agbStatsResultMatchesSelection =
-      selectedPolygonInfo !== null && agbStatsSelectionUid === selectedPolygonInfo.selectionUid;
+    const agbStatsResultMatchesSelection = shouldUseAgbStatsResultForSelection(
+      agbStatsSelectionUid,
+      selectedPolygonInfo?.selectionUid ?? null,
+    );
 
     if (
       selectedPolygonInfo
       && agbStatsJob.status === "idle"
       && !agbStatsJob.error
       && cachedAgbStatsResult
+      && agbStatsResultMatchesSelection
     ) {
       return {
         ...agbStatsJob,
@@ -1373,12 +1391,9 @@ export default function MapContainer() {
       return;
     }
 
-    if (selectedLandcoverStatsCacheKey && landcoverStatsResultCache[selectedLandcoverStatsCacheKey]) {
-      setStatusMessage(`Loaded cached landcover stats for ${selectedPolygonInfo.layerName}.`);
-      return;
-    }
-
     try {
+      const selectionUid = selectedPolygonInfo.selectionUid;
+      setLandcoverStatsSelectionUid(selectionUid);
       setStatusMessage(`Queued landcover stats for ${selectedPolygonInfo.layerName}.`);
 
       await landcoverStatsJob.startJob({
@@ -1410,12 +1425,9 @@ export default function MapContainer() {
       return;
     }
 
-    if (selectedChmStatsCacheKey && chmStatsResultCache[selectedChmStatsCacheKey]) {
-      setStatusMessage(`Loaded cached CHM stats for ${selectedPolygonInfo.layerName}.`);
-      return;
-    }
-
     try {
+      const selectionUid = selectedPolygonInfo.selectionUid;
+      setChmStatsSelectionUid(selectionUid);
       setStatusMessage(`Queued CHM stats for ${selectedPolygonInfo.layerName}.`);
 
       await chmStatsJob.startJob({
@@ -1445,12 +1457,8 @@ export default function MapContainer() {
       return;
     }
 
-    setAgbStatsSelectionUid(selectedPolygonInfo.selectionUid);
-
-    if (selectedAgbStatsCacheKey && agbStatsResultCache[selectedAgbStatsCacheKey]) {
-      setStatusMessage(`Loaded cached AGB stats for ${selectedPolygonInfo.layerName}.`);
-      return;
-    }
+    const selectionUid = selectedPolygonInfo.selectionUid;
+    setAgbStatsSelectionUid(selectionUid);
 
     try {
       setStatusMessage(`Queued AGB stats for ${selectedPolygonInfo.layerName}.`);
@@ -1458,6 +1466,24 @@ export default function MapContainer() {
       const completedJob = await agbStatsJob.startJob({
         geojson: selectedPolygonGeoJson,
       });
+
+      if (completedJob.status === "succeeded" || completedJob.status === "partial_success") {
+        setAgbStatsResultCache((previous) => {
+          if (!completedJob.result) {
+            return previous;
+          }
+
+          const cacheKey = selectionUid;
+          if (previous[cacheKey] === completedJob.result) {
+            return previous;
+          }
+
+          return {
+            ...previous,
+            [cacheKey]: completedJob.result,
+          };
+        });
+      }
 
       if (completedJob.status === "partial_success") {
         setStatusMessage(`AGB stats partially completed for ${selectedPolygonInfo.layerName}.`);

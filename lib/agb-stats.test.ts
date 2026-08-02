@@ -26,6 +26,7 @@ const POLYGON_FEATURE_COLLECTION = {
 describe("agb-stats client", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("creates a AGB stats job successfully", async () => {
@@ -55,6 +56,26 @@ describe("agb-stats client", () => {
         }),
       }),
     );
+  });
+
+  it("prefers AGB-specific API keys over generic landcover and CHM keys", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      jobId: "agb-stats-2",
+      status: "queued",
+      message: "created",
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+
+    vi.stubEnv("UPSTREAM_API_KEY", "shared-secret");
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createAgbStatsJob({
+      geojson: POLYGON_FEATURE_COLLECTION,
+    }, {
+      baseUrl: "/api/v1/ctrees/agb/stats",
+    });
+
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string> | undefined;
+    expect(headers?.["X-API-Key"]).toBe("shared-secret");
   });
 
   it("polls AGB stats until success", async () => {
