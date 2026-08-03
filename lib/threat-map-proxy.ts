@@ -14,7 +14,7 @@ function getApiMode(): "local" | "remote" {
 function resolveApiBaseUrl(): string {
   const mode = getApiMode();
   const localBaseUrl = process.env.API_BASE_URL_LOCAL?.trim() ?? "http://127.0.0.1:8000";
-  const remoteBaseUrl = process.env.API_BASE_URL_REMOTE?.trim() ?? "http://178.104.154.106";
+  const remoteBaseUrl = process.env.API_BASE_URL_REMOTE?.trim() ?? "http://178.104.153.106";
   return mode === "remote" ? remoteBaseUrl : localBaseUrl;
 }
 
