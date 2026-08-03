@@ -1,5 +1,6 @@
 export const chmLegend = {
   scheme: "Canopy Height Model",
+  schemeId: "Model Tinggi Kanopi",
   breaks: [0, 4, 8, 12, 16, 19, 23, 27, 30],
   colors: [
     "#440154",

@@ -2,6 +2,7 @@
 
 import { MapPlus, PencilLine, Trash2, Upload } from "lucide-react";
 
+import { useI18n } from "@/components/providers/i18n-provider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
@@ -46,6 +47,8 @@ export function CommunityMapPanel({
   onPolygonDelete,
   embedded = false,
 }: CommunityMapPanelProps) {
+  const { locale, t } = useI18n();
+
   const panelContent = (
     <div className="space-y-2.5">
       <div className="sticky top-0 z-20 space-y-2 bg-cyan-50/95 pb-2 backdrop-blur-sm">
@@ -58,7 +61,7 @@ export function CommunityMapPanel({
             onClick={onUploadClick}
           >
             <Upload className="size-4" />
-            Upload shapefile
+            {t("community.uploadShapefile", "Upload vector")}
           </Button>
 
           {isDrawingPolygon ? (
@@ -70,7 +73,7 @@ export function CommunityMapPanel({
               onClick={onCancelDrawing}
             >
               <PencilLine className="size-4" />
-              Cancel
+              {t("common.cancel", "Cancel")}
             </Button>
           ) : (
             <Button
@@ -81,14 +84,14 @@ export function CommunityMapPanel({
               onClick={onStartDrawing}
             >
               <PencilLine className="size-4" />
-              Draw
+              {t("community.draw", "Draw")}
             </Button>
           )}
         </div>
 
         {isDrawingPolygon ? (
           <div className="rounded-md border border-cyan-200/80 bg-white/85 px-2 py-1.5 text-xs text-cyan-900/80">
-            Vertices placed: <span className="font-semibold text-cyan-950">{drawnVertexCount}</span>
+            {t("community.verticesPlaced", "Vertices placed")}: <span className="font-semibold text-cyan-950">{drawnVertexCount}</span>
           </div>
         ) : null}
       </div>
@@ -109,7 +112,7 @@ export function CommunityMapPanel({
                           type="button"
                           className="truncate text-left text-sm text-cyan-950 underline-offset-2 hover:underline focus:outline-none focus-visible:underline"
                           onClick={() => onPolygonFocus(item.fileName)}
-                          title={`Zoom to ${item.fileName}`}
+                          title={`${t("community.zoomTo", "Zoom to")} ${item.fileName}`}
                         >
                           {item.fileName}
                         </button>
@@ -123,9 +126,9 @@ export function CommunityMapPanel({
                         onCheckedChange={(checked) =>
                           onPolygonVisibilityChange(item.fileName, checked)
                         }
-                        aria-label={`Toggle ${item.fileName}`}
+                        aria-label={`${t("community.toggleLayer", "Toggle")} ${item.fileName}`}
                       />
-                      <Button type="button" variant="ghost" size="icon-xs" aria-label={`Delete ${item.fileName}`} onClick={() => onPolygonDelete(item.fileName)}>
+                      <Button type="button" variant="ghost" size="icon-xs" aria-label={`${t("community.deleteLayer", "Delete")} ${item.fileName}`} onClick={() => onPolygonDelete(item.fileName)}>
                         <Trash2 className="size-3.5 text-destructive" />
                       </Button>
                     </div>
@@ -139,7 +142,7 @@ export function CommunityMapPanel({
                             htmlFor={`group-by-${item.fileName}`}
                             className="text-xs text-cyan-900/70"
                           >
-                            Group By Column
+                            {t("community.groupByColumn", "Group By Column")}
                           </label>
                           <select
                             id={`group-by-${item.fileName}`}
@@ -152,9 +155,9 @@ export function CommunityMapPanel({
                               );
                             }}
                             className="h-8 w-full rounded-md border border-cyan-200/80 bg-white px-2 text-xs text-cyan-950 outline-none ring-cyan-400 transition focus:ring-2"
-                            aria-label={`Group ${item.fileName} polygons by column`}
+                            aria-label={`${t("community.groupPolygonsByColumn", "Group polygons by column")}: ${item.fileName}`}
                           >
-                            <option value="__none__">None (single color)</option>
+                            <option value="__none__">{t("community.noneSingleColor", "None (single color)")}</option>
                             {item.availableGroupingColumns.map((column) => (
                               <option key={column} value={column}>
                                 {column}
@@ -164,7 +167,9 @@ export function CommunityMapPanel({
                           {item.groupingColumn ? (
                             <>
                               <div className="text-[11px] text-cyan-900/70">
-                                {item.groupCount} group{item.groupCount === 1 ? "" : "s"} by {item.groupingColumn}
+                                {locale === "id"
+                                  ? `${item.groupCount} grup berdasarkan ${item.groupingColumn}`
+                                  : `${item.groupCount} group${item.groupCount === 1 ? "" : "s"} by ${item.groupingColumn}`}
                               </div>
                               {item.groupingPreview.length > 0 ? (
                                 <div className="flex flex-wrap gap-1">
@@ -184,7 +189,7 @@ export function CommunityMapPanel({
                                   ))}
                                   {item.groupCount > item.groupingPreview.length ? (
                                     <div className="inline-flex items-center rounded-full border border-cyan-200/80 bg-white/70 px-2 py-0.5 text-[10px] text-cyan-900/80">
-                                      +{item.groupCount - item.groupingPreview.length} more
+                                      +{item.groupCount - item.groupingPreview.length} {t("community.more", "more")}
                                     </div>
                                   ) : null}
                                 </div>
@@ -195,7 +200,7 @@ export function CommunityMapPanel({
                       ) : null}
 
                       <div className="flex items-center justify-between gap-3 text-xs text-cyan-900/70">
-                        <span>Fill Opacity</span>
+                        <span>{t("community.fillOpacity", "Fill Opacity")}</span>
                         <span className="tabular-nums">{Math.round(item.opacity * 100)}%</span>
                       </div>
                       <Slider
@@ -210,7 +215,7 @@ export function CommunityMapPanel({
                             (nextValue ?? Math.round(item.opacity * 100)) / 100,
                           );
                         }}
-                        aria-label={`Set opacity for ${item.fileName}`}
+                        aria-label={`${t("community.setOpacityFor", "Set opacity for")} ${item.fileName}`}
                       />
                     </div>
                   ) : null}
@@ -235,7 +240,7 @@ export function CommunityMapPanel({
       <CardHeader className="py-1">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold text-cyan-950">
           <MapPlus className="size-4" />
-          Community Map
+          {t("community.panelTitle", "Community Map")}
         </CardTitle>
       </CardHeader>
       <CardContent className="min-h-0 flex-1 space-y-2.5 overflow-y-auto pb-3 pr-2 pt-0">

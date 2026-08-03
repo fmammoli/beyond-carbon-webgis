@@ -189,9 +189,54 @@ function resolveThreatMapApiKey(baseUrl?: string, providedApiKey?: string): stri
   return null;
 }
 
+function normalizeJoinPath(basePath: string, nextPath: string): string {
+  const normalizedBase = basePath.replace(/\/$/, "");
+  const normalizedNext = nextPath.startsWith("/") ? nextPath : `/${nextPath}`;
+  return `${normalizedBase}${normalizedNext}`;
+}
+
 function resolveThreatMapUrl(pathname: string, baseUrl?: string): string {
   const normalizedPath = pathname.startsWith("/") ? pathname : `/${pathname}`;
-  return `${resolveThreatMapBaseUrl(baseUrl)}${DEFAULT_THREAT_MAP_API_PATH_PREFIX}${normalizedPath}`;
+  const normalizedBaseUrl = resolveThreatMapBaseUrl(baseUrl);
+
+  if (!normalizedBaseUrl) {
+    return normalizeJoinPath(DEFAULT_THREAT_MAP_API_PATH_PREFIX, normalizedPath);
+  }
+
+  if (normalizedBaseUrl.startsWith("/")) {
+    if (
+      normalizedBaseUrl === DEFAULT_THREAT_MAP_API_PATH_PREFIX
+      || normalizedBaseUrl.endsWith(DEFAULT_THREAT_MAP_API_PATH_PREFIX)
+    ) {
+      return normalizeJoinPath(normalizedBaseUrl, normalizedPath);
+    }
+
+    return normalizeJoinPath(
+      normalizeJoinPath(normalizedBaseUrl, DEFAULT_THREAT_MAP_API_PATH_PREFIX),
+      normalizedPath,
+    );
+  }
+
+  try {
+    const parsed = new URL(normalizedBaseUrl);
+    const normalizedBasePath = parsed.pathname.replace(/\/$/, "");
+
+    if (
+      normalizedBasePath === DEFAULT_THREAT_MAP_API_PATH_PREFIX
+      || normalizedBasePath.endsWith(DEFAULT_THREAT_MAP_API_PATH_PREFIX)
+    ) {
+      parsed.pathname = normalizeJoinPath(normalizedBasePath || "/", normalizedPath);
+      return parsed.toString().replace(/\/$/, "");
+    }
+
+    parsed.pathname = normalizeJoinPath(
+      normalizeJoinPath(normalizedBasePath || "/", DEFAULT_THREAT_MAP_API_PATH_PREFIX),
+      normalizedPath,
+    );
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return `${normalizedBaseUrl}${DEFAULT_THREAT_MAP_API_PATH_PREFIX}${normalizedPath}`;
+  }
 }
 
 function buildThreatMapRequestHeaders(options: {

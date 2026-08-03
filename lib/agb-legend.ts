@@ -1,5 +1,6 @@
 export const agbLegend = {
   scheme: "Aboveground Biomass Density",
+  schemeId: "Kerapatan Biomassa Atas Permukaan",
   breaks: [0, 50, 100, 150, 200, 250, 300],
   colors: ["#ffffff", "#f5efcf", "#ded37a", "#9ecd68", "#4fa35f", "#1f3a93"],
   labels: [

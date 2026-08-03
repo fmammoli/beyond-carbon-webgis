@@ -173,4 +173,46 @@ describe("threat-map client", () => {
     expect(requestBody).not.toHaveProperty("geojson_crs");
     expect(requestBody).not.toHaveProperty("overlay_layers");
   });
+
+  it("does not duplicate threat-map path prefix for relative baseUrl", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      jobId: "tm-6",
+      status: "queued",
+      message: "queued",
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createThreatMapJob({
+      geojson: FEATURE_COLLECTION,
+      preset: "balanced",
+    }, {
+      baseUrl: "/api/v1/threat-map",
+      apiKey: "test-key",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/threat-map/jobs");
+  });
+
+  it("does not duplicate threat-map path prefix for absolute baseUrl", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      jobId: "tm-7",
+      status: "queued",
+      message: "queued",
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createThreatMapJob({
+      geojson: FEATURE_COLLECTION,
+      preset: "balanced",
+    }, {
+      baseUrl: "http://localhost:3000/api/v1/threat-map",
+      apiKey: "test-key",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://localhost:3000/api/v1/threat-map/jobs");
+  });
 });

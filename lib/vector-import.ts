@@ -13,6 +13,8 @@ type FeatureCollectionWithCrs = FeatureCollection<Geometry, GeoJsonProperties> &
   crs?: { type?: string; properties?: { name?: string } };
 };
 
+export const MAX_GEOJSON_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
+
 const SUPPORTED_VECTOR_EXTENSIONS = new Set([
   ".zip",
   ".geojson",
@@ -32,6 +34,33 @@ export type ParsedVectorFile = {
   fileName: string;
   geojson: FeatureCollection<Geometry, GeoJsonProperties>;
 };
+
+function formatByteSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${bytes} B`;
+}
+
+function assertGeoJsonUploadSize(file: Pick<File, "name" | "size">): void {
+  if (file.size <= MAX_GEOJSON_UPLOAD_SIZE_BYTES) {
+    return;
+  }
+
+  throw new Error(
+    `GeoJSON uploads larger than ${formatByteSize(MAX_GEOJSON_UPLOAD_SIZE_BYTES)} are not supported in the browser uploader. `
+      + `This file is ${formatByteSize(file.size)}. Simplify it, convert it to vector tiles, or upload a zipped shapefile bundle instead.`,
+  );
+}
 
 function toFeatureCollection(
   input: FeatureCollection<Geometry, GeoJsonProperties> | AnyFeature,
@@ -288,6 +317,8 @@ export async function parseVectorFile(fileOrFiles: File | File[]): Promise<Parse
     if (!jsonFile) {
       throw new Error("The selected GeoJSON file could not be read.");
     }
+
+    assertGeoJsonUploadSize(jsonFile);
 
     const text = await jsonFile.text();
     return {

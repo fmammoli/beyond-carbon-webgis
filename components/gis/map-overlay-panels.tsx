@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Download, Layers, MapPlus, Video } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Languages, Layers, MapPlus, Video } from "lucide-react";
 
+import { useI18n } from "@/components/providers/i18n-provider";
 import { Legend, type ActiveLegendLayer } from "@/components/gis/legend";
 import { MapControls } from "@/components/gis/map-controls";
 import { TimeSlider } from "@/components/gis/time-slider";
@@ -136,6 +137,34 @@ type HoverVectorTooltipProps = {
   isVisible: boolean;
 };
 
+function LocalePanelHeader() {
+  const { locale, setLocale, isSwitchingLocale, t } = useI18n();
+
+  return (
+    <div className="pointer-events-auto w-[min(92vw,18rem)] rounded-xl border border-white/30 bg-card/85 p-3 shadow-lg backdrop-blur-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-base font-semibold text-slate-950">{t("app.title", "Beyond Carbon")}</div>
+          <div className="text-xs text-slate-600">{t("header.language", "Language")}</div>
+        </div>
+        <label className="flex min-w-0 items-center gap-2 text-xs text-slate-700">
+          <Languages className="size-4 shrink-0 text-slate-500" aria-hidden />
+          <select
+            value={locale}
+            onChange={(event) => setLocale(event.target.value as "en" | "id")}
+            disabled={isSwitchingLocale}
+            aria-label={t("header.language", "Language")}
+            className="h-9 min-w-28 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-950 outline-none ring-sky-300 transition focus:ring-2 disabled:cursor-wait disabled:opacity-70"
+          >
+            <option value="en">{t("header.english", "English")}</option>
+            <option value="id">{t("header.indonesian", "Indonesian")}</option>
+          </select>
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function formatTooltipArea(value: number, compact = false): string {
   return new Intl.NumberFormat("en-US", {
     minimumFractionDigits: compact && value >= 100 ? 0 : value >= 10 ? 1 : 2,
@@ -232,6 +261,7 @@ export function MapTopPanels({
   primaryAction,
   exportsAction,
 }: MapTopPanelsProps) {
+  const { t } = useI18n();
   const hasCommunityPanel = Boolean(primaryAction);
   const hasExportsPanel = Boolean(exportsAction);
   const hasTabbedPanels = hasCommunityPanel || hasExportsPanel;
@@ -240,25 +270,27 @@ export function MapTopPanels({
   return (
     <div className="absolute left-3 right-3 top-3 md:left-5 md:right-5 md:top-5">
       <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-        <div className="pointer-events-auto flex h-[calc(100dvh-5.5rem)] w-full min-h-0 md:h-[calc(100dvh-6.5rem)] md:w-auto md:min-w-[18rem]">
-          <Card className="flex h-full min-h-0 w-[min(92vw,18rem)] flex-col border-white/30 bg-card/85 shadow-lg backdrop-blur-sm">
+        <div className="flex w-full min-h-0 flex-col gap-2 md:w-auto md:min-w-[18rem]">
+          <LocalePanelHeader />
+          <div className="pointer-events-auto flex h-[calc(100dvh-5.5rem)] w-full min-h-0 md:h-[calc(100dvh-6.5rem)] md:w-auto">
+            <Card className="flex h-full min-h-0 w-[min(92vw,18rem)] flex-col border-white/30 bg-card/85 shadow-lg backdrop-blur-sm">
             {hasTabbedPanels ? (
               <Tabs defaultValue="layers" className="min-h-0 flex-1 gap-0 px-2 pb-2 pt-2">
                 <TabsList className="grid w-full" style={{ gridTemplateColumns: `repeat(${tabColumnCount}, minmax(0, 1fr))` }}>
-                  <TabsTrigger value="layers" aria-label="Open layer controls tab">
+                  <TabsTrigger value="layers" aria-label={t("tabs.openLayerControlsTab", "Open layer controls tab")}>
                     <Layers />
-                    Layers
+                    {t("tabs.layers", "Layers")}
                   </TabsTrigger>
                   {hasCommunityPanel ? (
-                    <TabsTrigger value="community" aria-label="Open community map tab">
+                    <TabsTrigger value="community" aria-label={t("tabs.openCommunityMapTab", "Open community map tab")}>
                       <MapPlus />
-                      Community
+                      {t("tabs.community", "Community")}
                     </TabsTrigger>
                   ) : null}
                   {hasExportsPanel ? (
-                    <TabsTrigger value="exports" aria-label="Open exports tab">
+                    <TabsTrigger value="exports" aria-label={t("tabs.openExportsTab", "Open exports tab")}>
                       <Video />
-                      Exports
+                      {t("tabs.exports", "Exports")}
                     </TabsTrigger>
                   ) : null}
                 </TabsList>
@@ -341,7 +373,8 @@ export function MapTopPanels({
                 />
               </CardContent>
             )}
-          </Card>
+            </Card>
+          </div>
         </div>
 
         <div className="pointer-events-auto self-start md:ml-auto">
@@ -408,6 +441,7 @@ function SelectedPolygonInfoPanel({
   onCancelAgbStats: () => void;
   agbStatsJob: AgbStatsJobViewState;
 }) {
+  const { t } = useI18n();
   const hasPrecomputedStats = Boolean(selectedPolygon?.precomputedLandcoverStats);
   const displayedStatsResult = selectedPolygon
     ? selectedPolygon.precomputedLandcoverStats ?? landcoverStatsJob.result
@@ -448,101 +482,140 @@ function SelectedPolygonInfoPanel({
   const [isAgbStatsResultOpen, setIsAgbStatsResultOpen] = useState(true);
   const [isAgbStatsMetadataOpen, setIsAgbStatsMetadataOpen] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
-  const selectedTitle = selectedPolygon?.layerName ?? "Selected Feature";
+  const selectedTitle = selectedPolygon?.layerName ?? t("selectedPanel.defaultTitle", "Selected Feature");
   const statsActionLabel = isStatsActive
     ? landcoverStatsJob.status === "submitting"
-      ? "Submitting..."
+      ? t("selectedPanel.submitting", "Submitting...")
       : landcoverStatsJob.status === "queued"
-        ? "Queued..."
-        : "Running..."
+        ? t("selectedPanel.queued", "Queued...")
+        : t("selectedPanel.running", "Running...")
     : landcoverStatsJob.status === "failed"
-      ? "Retry stats"
-      : "Run landcover stats";
+      ? t("selectedPanel.retryStats", "Retry stats")
+      : t("selectedPanel.runLandcoverStats", "Run landcover stats");
   const chmStatsActionLabel = isChmStatsActive
     ? chmStatsJob.status === "submitting"
-      ? "Submitting..."
+      ? t("selectedPanel.submitting", "Submitting...")
       : chmStatsJob.status === "queued"
-        ? "Queued..."
-        : "Running..."
+        ? t("selectedPanel.queued", "Queued...")
+        : t("selectedPanel.running", "Running...")
     : chmStatsJob.status === "failed"
-      ? "Retry stats"
-      : "Run CHM stats";
+      ? t("selectedPanel.retryStats", "Retry stats")
+      : t("selectedPanel.runChmStats", "Run CHM stats");
   const agbStatsActionLabel = isAgbStatsActive
     ? agbStatsJob.status === "submitting"
-      ? "Submitting..."
+      ? t("selectedPanel.submitting", "Submitting...")
       : agbStatsJob.status === "queued"
-        ? "Queued..."
+        ? t("selectedPanel.queued", "Queued...")
         : agbStatsJob.status === "deferred"
-          ? "Deferred..."
-          : "Running..."
+          ? t("selectedPanel.deferred", "Deferred...")
+          : t("selectedPanel.running", "Running...")
     : agbStatsJob.status === "failed"
-      ? "Retry stats"
+      ? t("selectedPanel.retryStats", "Retry stats")
       : agbStatsJob.status === "cancelled"
-        ? "Run again"
-        : "Run AGB stats";
+        ? t("selectedPanel.runAgain", "Run again")
+        : t("selectedPanel.runAgbStats", "Run AGB stats");
+
+  const labels = {
+    baselineYear: t("selectedPanel.baselineYear", "Baseline year"),
+    comparisonYear: t("selectedPanel.comparisonYear", "Comparison year"),
+    forestLoss: t("selectedPanel.forestLoss", "Forest loss"),
+    forestLossPercent: t("selectedPanel.forestLossPercent", "Forest loss (%)"),
+    forestGain: t("selectedPanel.forestGain", "Forest gain"),
+    forestGainPercent: t("selectedPanel.forestGainPercent", "Forest gain (%)"),
+    netChange: t("selectedPanel.netChange", "Net change"),
+    baselineForestArea: t("selectedPanel.baselineForestArea", "Baseline forest area"),
+    comparisonForestArea: t("selectedPanel.comparisonForestArea", "Comparison forest area"),
+    analyzedArea: t("selectedPanel.analyzedArea", "Analyzed area"),
+    aoiArea: t("selectedPanel.aoiArea", "AOI area"),
+    coverageFraction: t("selectedPanel.coverageFraction", "Coverage fraction"),
+    validPixels: t("selectedPanel.validPixels", "Valid pixels"),
+    minCanopyHeight: t("selectedPanel.minCanopyHeight", "Min canopy height"),
+    maxCanopyHeight: t("selectedPanel.maxCanopyHeight", "Max canopy height"),
+    meanCanopyHeight: t("selectedPanel.meanCanopyHeight", "Mean canopy height"),
+    medianCanopyHeight: t("selectedPanel.medianCanopyHeight", "Median canopy height"),
+    stdDeviation: t("selectedPanel.stdDeviation", "Std. deviation"),
+    variance: t("selectedPanel.variance", "Variance"),
+    iqr: t("selectedPanel.iqr", "IQR"),
+    coefficientOfVariation: t("selectedPanel.coefficientOfVariation", "Coefficient of variation"),
+    canopyVolumeProxy: t("selectedPanel.canopyVolumeProxy", "Canopy volume proxy"),
+    totalAgbHa: t("selectedPanel.totalAgbHa", "Total AGB/ha"),
+    minAgb: t("selectedPanel.minAgb", "Min AGB"),
+    maxAgb: t("selectedPanel.maxAgb", "Max AGB"),
+    meanAgb: t("selectedPanel.meanAgb", "Mean AGB"),
+    medianAgb: t("selectedPanel.medianAgb", "Median AGB"),
+    totalAgb: t("selectedPanel.totalAgb", "Total AGB"),
+    baselineTotalAgb: t("selectedPanel.baselineTotalAgb", "Baseline total AGB"),
+    comparisonTotalAgb: t("selectedPanel.comparisonTotalAgb", "Comparison total AGB"),
+    agbIncrease: t("selectedPanel.agbIncrease", "AGB increase"),
+    agbDecrease: t("selectedPanel.agbDecrease", "AGB decrease"),
+    netChangeDensity: t("selectedPanel.netChangeDensity", "Net change density"),
+    netChangePercent: t("selectedPanel.netChangePercent", "Net change percent"),
+    increaseArea: t("selectedPanel.increaseArea", "Increase area"),
+    decreaseArea: t("selectedPanel.decreaseArea", "Decrease area"),
+  };
 
   const statRows = displayedStatsResult
     ? [
-        ["Baseline year", displayedStatsResult.baselineYear === undefined ? "N/A" : String(displayedStatsResult.baselineYear)],
-        ["Comparison year", displayedStatsResult.comparisonYear === undefined ? "N/A" : String(displayedStatsResult.comparisonYear)],
-        ["Forest loss", `${formatStatsNumber(displayedStatsResult.forestLossHa, 2)} ha`],
-        ["Forest loss (%)", displayedStatsResult.forestLossPct === undefined ? "N/A" : `${formatStatsNumber(displayedStatsResult.forestLossPct, 3)}%`],
-        ["Forest gain", `${formatStatsNumber(displayedStatsResult.forestGainHa, 2)} ha`],
-        ["Forest gain (%)", displayedStatsResult.forestGainPct === undefined ? "N/A" : `${formatStatsNumber(displayedStatsResult.forestGainPct, 3)}%`],
-        ["Net change", `${formatStatsNumber(displayedStatsResult.netForestChangeHa, 2)} ha`],
-        ["Baseline forest area", `${formatStatsNumber(displayedStatsResult.baselineForestAreaHa, 2)} ha`],
-        ["Comparison forest area", `${formatStatsNumber(displayedStatsResult.comparisonForestAreaHa, 2)} ha`],
-        ["Analyzed area", `${formatStatsNumber(displayedStatsResult.analyzedAreaHa, 2)} ha`],
-        ["AOI area", `${formatStatsNumber(displayedStatsResult.aoiAreaHa, 2)} ha`],
-        ["Coverage fraction", formatStatsNumber(displayedStatsResult.coverageFraction, 3)],
-        ["Valid pixels", new Intl.NumberFormat("en-US").format(displayedStatsResult.validPixelCount)],
+        [labels.baselineYear, displayedStatsResult.baselineYear === undefined ? "N/A" : String(displayedStatsResult.baselineYear)],
+        [labels.comparisonYear, displayedStatsResult.comparisonYear === undefined ? "N/A" : String(displayedStatsResult.comparisonYear)],
+        [labels.forestLoss, `${formatStatsNumber(displayedStatsResult.forestLossHa, 2)} ha`],
+        [labels.forestLossPercent, displayedStatsResult.forestLossPct === undefined ? "N/A" : `${formatStatsNumber(displayedStatsResult.forestLossPct, 3)}%`],
+        [labels.forestGain, `${formatStatsNumber(displayedStatsResult.forestGainHa, 2)} ha`],
+        [labels.forestGainPercent, displayedStatsResult.forestGainPct === undefined ? "N/A" : `${formatStatsNumber(displayedStatsResult.forestGainPct, 3)}%`],
+        [labels.netChange, `${formatStatsNumber(displayedStatsResult.netForestChangeHa, 2)} ha`],
+        [labels.baselineForestArea, `${formatStatsNumber(displayedStatsResult.baselineForestAreaHa, 2)} ha`],
+        [labels.comparisonForestArea, `${formatStatsNumber(displayedStatsResult.comparisonForestAreaHa, 2)} ha`],
+        [labels.analyzedArea, `${formatStatsNumber(displayedStatsResult.analyzedAreaHa, 2)} ha`],
+        [labels.aoiArea, `${formatStatsNumber(displayedStatsResult.aoiAreaHa, 2)} ha`],
+        [labels.coverageFraction, formatStatsNumber(displayedStatsResult.coverageFraction, 3)],
+        [labels.validPixels, new Intl.NumberFormat("en-US").format(displayedStatsResult.validPixelCount)],
       ]
     : [];
 
   const chmSummaryRows = displayedChmStatsResult
     ? [
-        ["Min canopy height", `${formatStatsNumber(displayedChmStatsResult.minCanopyHeightM, 2)} m`],
-        ["Max canopy height", `${formatStatsNumber(displayedChmStatsResult.maxCanopyHeightM, 2)} m`],
-        ["Mean canopy height", `${formatStatsNumber(displayedChmStatsResult.meanCanopyHeightM, 2)} m`],
-        ["Median canopy height", `${formatStatsNumber(displayedChmStatsResult.medianCanopyHeightM, 2)} m`],
-        ["Std. deviation", `${formatStatsNumber(displayedChmStatsResult.stdDevCanopyHeightM, 3)} m`],
+        [labels.minCanopyHeight, `${formatStatsNumber(displayedChmStatsResult.minCanopyHeightM, 2)} m`],
+        [labels.maxCanopyHeight, `${formatStatsNumber(displayedChmStatsResult.maxCanopyHeightM, 2)} m`],
+        [labels.meanCanopyHeight, `${formatStatsNumber(displayedChmStatsResult.meanCanopyHeightM, 2)} m`],
+        [labels.medianCanopyHeight, `${formatStatsNumber(displayedChmStatsResult.medianCanopyHeightM, 2)} m`],
+        [labels.stdDeviation, `${formatStatsNumber(displayedChmStatsResult.stdDevCanopyHeightM, 3)} m`],
       ]
     : [];
 
   const chmDistributionRows = displayedChmStatsResult
     ? [
-        ["Variance", formatStatsNumber(displayedChmStatsResult.varianceCanopyHeightM2, 3)],
+        [labels.variance, formatStatsNumber(displayedChmStatsResult.varianceCanopyHeightM2, 3)],
         ["P10", `${formatStatsNumber(displayedChmStatsResult.p10CanopyHeightM, 2)} m`],
         ["P25", `${formatStatsNumber(displayedChmStatsResult.p25CanopyHeightM, 2)} m`],
         ["P75", `${formatStatsNumber(displayedChmStatsResult.p75CanopyHeightM, 2)} m`],
         ["P90", `${formatStatsNumber(displayedChmStatsResult.p90CanopyHeightM, 2)} m`],
         ["P95", `${formatStatsNumber(displayedChmStatsResult.p95CanopyHeightM, 2)} m`],
-        ["IQR", `${formatStatsNumber(displayedChmStatsResult.interquartileRangeM, 2)} m`],
-        ["Coefficient of variation", formatStatsNumber(displayedChmStatsResult.coefficientOfVariation, 4)],
+        [labels.iqr, `${formatStatsNumber(displayedChmStatsResult.interquartileRangeM, 2)} m`],
+        [labels.coefficientOfVariation, formatStatsNumber(displayedChmStatsResult.coefficientOfVariation, 4)],
       ]
     : [];
 
   const chmCoverageRows = displayedChmStatsResult
     ? [
-        ["Analyzed area", `${formatStatsNumber(displayedChmStatsResult.analyzedAreaHa, 2)} ha`],
-        ["AOI area", `${formatStatsNumber(displayedChmStatsResult.aoiAreaHa, 2)} ha`],
-        ["Coverage fraction", formatStatsNumber(displayedChmStatsResult.coverageFraction, 4)],
-        ["Valid pixels", new Intl.NumberFormat("en-US").format(displayedChmStatsResult.validPixelCount)],
-        ["Canopy volume proxy", `${formatStatsNumber(displayedChmStatsResult.totalCanopyVolumeProxyM3, 2)} m³`],
+        [labels.analyzedArea, `${formatStatsNumber(displayedChmStatsResult.analyzedAreaHa, 2)} ha`],
+        [labels.aoiArea, `${formatStatsNumber(displayedChmStatsResult.aoiAreaHa, 2)} ha`],
+        [labels.coverageFraction, formatStatsNumber(displayedChmStatsResult.coverageFraction, 4)],
+        [labels.validPixels, new Intl.NumberFormat("en-US").format(displayedChmStatsResult.validPixelCount)],
+        [labels.canopyVolumeProxy, `${formatStatsNumber(displayedChmStatsResult.totalCanopyVolumeProxyM3, 2)} m³`],
       ]
     : [];
 
   const agbSummaryRows = displayedAgbStatsResult
     ? [
-        ["Total AGB/ha", `${formatStatsNumber(displayedAgbStatsResult.totalAgbMgHa, 2)} Mg/ha`],
-        ["Baseline year", String(displayedAgbStatsResult.baselineYear)],
-        ["Comparison year", String(displayedAgbStatsResult.comparisonYear)],
-        ["Min AGB", `${formatStatsNumber(displayedAgbStatsResult.minAgbMgHa, 2)} Mg/ha`],
-        ["Max AGB", `${formatStatsNumber(displayedAgbStatsResult.maxAgbMgHa, 2)} Mg/ha`],
-        ["Mean AGB", `${formatStatsNumber(displayedAgbStatsResult.meanAgbMgHa, 2)} Mg/ha`],
-        ["Median AGB", `${formatStatsNumber(displayedAgbStatsResult.medianAgbMgHa, 2)} Mg/ha`],
-        ["Std. deviation", `${formatStatsNumber(displayedAgbStatsResult.stdDevAgbMgHa, 3)} Mg/ha`],
-        ["Variance", formatStatsNumber(displayedAgbStatsResult.varianceAgbMgHa2, 3)],
+        [labels.totalAgbHa, `${formatStatsNumber(displayedAgbStatsResult.totalAgbMgHa, 2)} Mg/ha`],
+        [labels.baselineYear, String(displayedAgbStatsResult.baselineYear)],
+        [labels.comparisonYear, String(displayedAgbStatsResult.comparisonYear)],
+        [labels.minAgb, `${formatStatsNumber(displayedAgbStatsResult.minAgbMgHa, 2)} Mg/ha`],
+        [labels.maxAgb, `${formatStatsNumber(displayedAgbStatsResult.maxAgbMgHa, 2)} Mg/ha`],
+        [labels.meanAgb, `${formatStatsNumber(displayedAgbStatsResult.meanAgbMgHa, 2)} Mg/ha`],
+        [labels.medianAgb, `${formatStatsNumber(displayedAgbStatsResult.medianAgbMgHa, 2)} Mg/ha`],
+        [labels.stdDeviation, `${formatStatsNumber(displayedAgbStatsResult.stdDevAgbMgHa, 3)} Mg/ha`],
+        [labels.variance, formatStatsNumber(displayedAgbStatsResult.varianceAgbMgHa2, 3)],
       ]
     : [];
 
@@ -553,32 +626,32 @@ function SelectedPolygonInfoPanel({
         ["P75", `${formatStatsNumber(displayedAgbStatsResult.p75AgbMgHa, 2)} Mg/ha`],
         ["P90", `${formatStatsNumber(displayedAgbStatsResult.p90AgbMgHa, 2)} Mg/ha`],
         ["P95", `${formatStatsNumber(displayedAgbStatsResult.p95AgbMgHa, 2)} Mg/ha`],
-        ["IQR", `${formatStatsNumber(displayedAgbStatsResult.interquartileRangeMgHa, 2)} Mg/ha`],
-        ["Coefficient of variation", formatStatsNumber(displayedAgbStatsResult.coefficientOfVariation, 4)],
+        [labels.iqr, `${formatStatsNumber(displayedAgbStatsResult.interquartileRangeMgHa, 2)} Mg/ha`],
+        [labels.coefficientOfVariation, formatStatsNumber(displayedAgbStatsResult.coefficientOfVariation, 4)],
       ]
     : [];
 
   const agbChangeRows = displayedAgbStatsResult
     ? [
-        ["Total AGB", `${formatStatsNumber(displayedAgbStatsResult.totalAgbMg, 2)} Mg`],
-        ["Baseline total AGB", `${formatStatsNumber(displayedAgbStatsResult.baselineTotalAgbMg, 2)} Mg`],
-        ["Comparison total AGB", `${formatStatsNumber(displayedAgbStatsResult.comparisonTotalAgbMg, 2)} Mg`],
-        ["AGB increase", `${formatStatsNumber(displayedAgbStatsResult.agbIncreaseMg, 2)} Mg`],
-        ["AGB decrease", `${formatStatsNumber(displayedAgbStatsResult.agbDecreaseMg, 2)} Mg`],
-        ["Net change", `${formatStatsNumber(displayedAgbStatsResult.netChangeAgbMg, 2)} Mg`],
-        ["Net change density", `${formatStatsNumber(displayedAgbStatsResult.netChangeAgbMgHa, 2)} Mg/ha`],
-        ["Net change percent", `${formatStatsNumber(displayedAgbStatsResult.netChangePercent, 2)}%`],
+        [labels.totalAgb, `${formatStatsNumber(displayedAgbStatsResult.totalAgbMg, 2)} Mg`],
+        [labels.baselineTotalAgb, `${formatStatsNumber(displayedAgbStatsResult.baselineTotalAgbMg, 2)} Mg`],
+        [labels.comparisonTotalAgb, `${formatStatsNumber(displayedAgbStatsResult.comparisonTotalAgbMg, 2)} Mg`],
+        [labels.agbIncrease, `${formatStatsNumber(displayedAgbStatsResult.agbIncreaseMg, 2)} Mg`],
+        [labels.agbDecrease, `${formatStatsNumber(displayedAgbStatsResult.agbDecreaseMg, 2)} Mg`],
+        [labels.netChange, `${formatStatsNumber(displayedAgbStatsResult.netChangeAgbMg, 2)} Mg`],
+        [labels.netChangeDensity, `${formatStatsNumber(displayedAgbStatsResult.netChangeAgbMgHa, 2)} Mg/ha`],
+        [labels.netChangePercent, `${formatStatsNumber(displayedAgbStatsResult.netChangePercent, 2)}%`],
       ]
     : [];
 
   const agbCoverageRows = displayedAgbStatsResult
     ? [
-        ["Analyzed area", `${formatStatsNumber(displayedAgbStatsResult.analyzedAreaHa, 2)} ha`],
-        ["AOI area", `${formatStatsNumber(displayedAgbStatsResult.aoiAreaHa, 2)} ha`],
-        ["Coverage fraction", formatStatsNumber(displayedAgbStatsResult.coverageFraction, 4)],
-        ["Valid pixels", new Intl.NumberFormat("en-US").format(displayedAgbStatsResult.validPixelCount)],
-        ["Increase area", `${formatStatsNumber(displayedAgbStatsResult.agbIncreaseAreaHa, 2)} ha`],
-        ["Decrease area", `${formatStatsNumber(displayedAgbStatsResult.agbDecreaseAreaHa, 2)} ha`],
+        [labels.analyzedArea, `${formatStatsNumber(displayedAgbStatsResult.analyzedAreaHa, 2)} ha`],
+        [labels.aoiArea, `${formatStatsNumber(displayedAgbStatsResult.aoiAreaHa, 2)} ha`],
+        [labels.coverageFraction, formatStatsNumber(displayedAgbStatsResult.coverageFraction, 4)],
+        [labels.validPixels, new Intl.NumberFormat("en-US").format(displayedAgbStatsResult.validPixelCount)],
+        [labels.increaseArea, `${formatStatsNumber(displayedAgbStatsResult.agbIncreaseAreaHa, 2)} ha`],
+        [labels.decreaseArea, `${formatStatsNumber(displayedAgbStatsResult.agbDecreaseAreaHa, 2)} ha`],
       ]
     : [];
 
@@ -598,8 +671,8 @@ function SelectedPolygonInfoPanel({
                 className="h-7 w-7 border-cyan-300 bg-white/90 text-cyan-900 hover:bg-cyan-100"
                 onClick={onDownloadSelectedPolygonGeoJson}
                 disabled={!canDownloadSelectedPolygon}
-                aria-label="Download polygon as GeoJSON"
-                title="Download selected feature as GeoJSON"
+                aria-label={t("selectedPanel.downloadPolygonAsGeoJson", "Download polygon as GeoJSON")}
+                title={t("selectedPanel.downloadSelectedFeatureAsGeoJson", "Download selected feature as GeoJSON")}
               >
                 <Download className="size-3.5" />
               </Button>
@@ -608,7 +681,9 @@ function SelectedPolygonInfoPanel({
           <div className="flex items-center gap-1">
             <CollapsibleTrigger
               className="inline-flex h-7 w-7 items-center justify-center rounded-md text-cyan-900 hover:bg-cyan-100"
-              aria-label={isPanelOpen ? "Collapse selected polygon panel" : "Expand selected polygon panel"}
+              aria-label={isPanelOpen
+                ? t("selectedPanel.collapse", "Collapse selected polygon panel")
+                : t("selectedPanel.expand", "Expand selected polygon panel")}
             >
               {isPanelOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
             </CollapsibleTrigger>
@@ -618,31 +693,31 @@ function SelectedPolygonInfoPanel({
         <CollapsibleContent className="mt-1 max-h-[calc(100dvh-10rem)] overflow-y-auto pr-1 md:max-h-[calc(100dvh-11rem)]">
           {!selectedPolygon ? (
             <p className="text-[13px] text-cyan-900/80">
-              Click a feature on the map to view its details and attributes.
+              {t("selectedPanel.emptyState", "Click a feature on the map to view its details and attributes.")}
             </p>
           ) : (
             <>
           <div className="mt-1.5 text-xs text-cyan-900/80">
             {selectedPolygon.groupingColumn
               ? `${selectedPolygon.groupingColumn}: ${selectedPolygon.groupingValue}`
-              : `Group: ${selectedPolygon.groupingValue}`}
+              : `${t("selectedPanel.group", "Group")}: ${selectedPolygon.groupingValue}`}
           </div>
           {areaSquareKilometers !== null && areaHectares !== null ? (
             <Collapsible open={isAreaOpen} onOpenChange={setIsAreaOpen}>
               <div className="mt-2 rounded-md border border-cyan-200/70 bg-white/70">
                 <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs font-semibold text-cyan-900">
-                  <span>Area Summary</span>
+                  <span>{t("selectedPanel.areaSummary", "Area Summary")}</span>
                   {isAreaOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                 </CollapsibleTrigger>
                 <CollapsibleContent className="px-2 pb-1.5 text-xs text-cyan-950">
                   <div className="flex items-start justify-between gap-2">
-                    <span className="text-cyan-900/75">Area</span>
+                    <span className="text-cyan-900/75">{t("selectedPanel.area", "Area")}</span>
                     <span className="text-right font-medium">
                       {formatTooltipArea(areaSquareKilometers)} km²
                     </span>
                   </div>
                   <div className="mt-0.5 flex items-start justify-between gap-2">
-                    <span className="text-cyan-900/75">Hectares</span>
+                    <span className="text-cyan-900/75">{t("selectedPanel.hectares", "Hectares")}</span>
                     <span className="text-right font-medium">
                       {formatTooltipArea(areaHectares, true)} ha
                     </span>
@@ -655,7 +730,7 @@ function SelectedPolygonInfoPanel({
           <Collapsible open={isPropertiesOpen} onOpenChange={setIsPropertiesOpen}>
             <div className="mt-2 rounded-md border border-cyan-200/70 bg-white/70">
               <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs font-semibold text-cyan-900">
-                <span>Properties</span>
+                <span>{t("selectedPanel.properties", "Properties")}</span>
                 {isPropertiesOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
               </CollapsibleTrigger>
               <CollapsibleContent className="px-2 pb-1.5">
@@ -669,7 +744,7 @@ function SelectedPolygonInfoPanel({
                     ))}
                   </div>
                 ) : (
-                  <div className="text-xs text-cyan-900/75">No properties found for this feature.</div>
+                  <div className="text-xs text-cyan-900/75">{t("selectedPanel.noProperties", "No properties found for this feature.")}</div>
                 )}
               </CollapsibleContent>
             </div>
@@ -678,9 +753,9 @@ function SelectedPolygonInfoPanel({
           <Collapsible open={isStatsOpen} onOpenChange={setIsStatsOpen}>
             <div className="mt-2 rounded-md border border-cyan-200/70 bg-white/75 text-xs text-cyan-950">
               <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left">
-                <span className="font-semibold text-cyan-900/80">Landcover stats</span>
+                <span className="font-semibold text-cyan-900/80">{t("selectedPanel.landcoverStats", "Landcover stats")}</span>
                 <div className="flex items-center gap-2">
-                  <span className="text-cyan-900/65">Comparison: {comparisonYear}</span>
+                  <span className="text-cyan-900/65">{t("selectedPanel.comparison", "Comparison")}: {comparisonYear}</span>
                   {isStatsOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                 </div>
               </CollapsibleTrigger>
@@ -688,7 +763,7 @@ function SelectedPolygonInfoPanel({
                 {!hasPrecomputedStats ? (
                   <>
                     <div className="flex items-center justify-between gap-2">
-                      <label className="text-cyan-900/75" htmlFor="landcover-stats-baseline-year">Baseline year</label>
+                      <label className="text-cyan-900/75" htmlFor="landcover-stats-baseline-year">{labels.baselineYear}</label>
                       <input
                         id="landcover-stats-baseline-year"
                         type="number"
@@ -701,11 +776,11 @@ function SelectedPolygonInfoPanel({
                     </div>
 
                     {!isYearPairValid ? (
-                      <div className="mt-1 text-xs text-amber-700">Baseline year must differ from the comparison year.</div>
+                      <div className="mt-1 text-xs text-amber-700">{t("selectedPanel.baselineYearMustDiffer", "Baseline year must differ from the comparison year.")}</div>
                     ) : null}
 
                     {!isPolygonSelection ? (
-                      <div className="mt-1 text-xs text-amber-700">Landcover stats only runs on polygon selections.</div>
+                      <div className="mt-1 text-xs text-amber-700">{t("selectedPanel.landcoverOnlyPolygon", "Landcover stats only runs on polygon selections.")}</div>
                     ) : null}
 
                     <div className="mt-2 flex items-center gap-2">
@@ -735,16 +810,16 @@ function SelectedPolygonInfoPanel({
                   </>
                 ) : (
                   <div className="mt-1 rounded-md border border-cyan-200/70 bg-cyan-50 px-2 py-1 text-xs text-cyan-900/80">
-                    {"Stats are loaded from this polygon's GeoJSON properties."}
+                    {t("selectedPanel.statsLoadedFromGeoJson", "Stats are loaded from this polygon's GeoJSON properties.")}
                   </div>
                 )}
 
                 {(!hasPrecomputedStats && (landcoverStatsJob.message || landcoverStatsJob.error || isStatsActive || landcoverStatsJob.status === "succeeded")) ? (
                   <div className="mt-2 space-y-1">
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-cyan-900/75">Status</span>
+                      <span className="text-cyan-900/75">{t("selectedPanel.status", "Status")}</span>
                       <span className="text-right font-medium">
-                        {landcoverStatsJob.error ? "Failed" : landcoverStatsJob.status === "idle" ? "Ready" : landcoverStatsJob.status}
+                        {landcoverStatsJob.error ? t("selectedPanel.failed", "Failed") : landcoverStatsJob.status === "idle" ? t("selectedPanel.ready", "Ready") : landcoverStatsJob.status}
                       </span>
                     </div>
 
@@ -762,7 +837,7 @@ function SelectedPolygonInfoPanel({
                       <div className="space-y-1">
                         {landcoverStatsJob.progress !== null ? (
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-cyan-900/75">Progress</span>
+                            <span className="text-cyan-900/75">{t("selectedPanel.progress", "Progress")}</span>
                             <span className="tabular-nums">{Math.max(0, Math.min(100, Math.round(landcoverStatsJob.progress))) }%</span>
                           </div>
                         ) : null}
@@ -773,8 +848,8 @@ function SelectedPolygonInfoPanel({
                           />
                         </div>
                         <div className="flex items-center justify-between gap-2 text-cyan-900/75">
-                          <span>ETA</span>
-                          <span>{landcoverStatsJob.etaSeconds === null || landcoverStatsJob.etaSeconds === undefined ? "estimating..." : `${Math.max(0, Math.round(landcoverStatsJob.etaSeconds))}s`}</span>
+                          <span>{t("selectedPanel.eta", "ETA")}</span>
+                          <span>{landcoverStatsJob.etaSeconds === null || landcoverStatsJob.etaSeconds === undefined ? t("selectedPanel.estimating", "estimating...") : `${Math.max(0, Math.round(landcoverStatsJob.etaSeconds))}s`}</span>
                         </div>
                       </div>
                     ) : null}
@@ -783,7 +858,7 @@ function SelectedPolygonInfoPanel({
                       <div className="rounded-md border border-cyan-200/70 bg-cyan-50/80 px-2 py-1.5">
                         <Collapsible open={isStatsResultOpen} onOpenChange={setIsStatsResultOpen}>
                           <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 text-left text-xs font-semibold text-cyan-900">
-                            <span>Result details</span>
+                            <span>{t("selectedPanel.resultDetails", "Result details")}</span>
                             {isStatsResultOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                           </CollapsibleTrigger>
                           <CollapsibleContent className="mt-1 space-y-1">
@@ -800,7 +875,7 @@ function SelectedPolygonInfoPanel({
                           <Collapsible open={isStatsMetadataOpen} onOpenChange={setIsStatsMetadataOpen}>
                             <div className="mt-1 rounded-md border border-cyan-200/70 bg-white/85 px-2 py-1">
                               <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 text-left">
-                                <div className="text-xs font-semibold uppercase tracking-wide text-cyan-900/70">Metadata</div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-cyan-900/70">{t("selectedPanel.metadata", "Metadata")}</div>
                                 {isStatsMetadataOpen ? <ChevronDown className="size-3.5 text-cyan-900/70" /> : <ChevronRight className="size-3.5 text-cyan-900/70" />}
                               </CollapsibleTrigger>
                               <CollapsibleContent>
@@ -819,14 +894,14 @@ function SelectedPolygonInfoPanel({
                 {hasPrecomputedStats && displayedStatsResult ? (
                   <div className="mt-2 space-y-1">
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-cyan-900/75">Status</span>
-                      <span className="text-right font-medium">Precomputed</span>
+                      <span className="text-cyan-900/75">{t("selectedPanel.status", "Status")}</span>
+                      <span className="text-right font-medium">{t("selectedPanel.precomputed", "Precomputed")}</span>
                     </div>
 
                     <div className="rounded-md border border-cyan-200/70 bg-cyan-50/80 px-2 py-1.5">
                       <Collapsible open={isStatsResultOpen} onOpenChange={setIsStatsResultOpen}>
                         <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 text-left text-xs font-semibold text-cyan-900">
-                          <span>Result details</span>
+                          <span>{t("selectedPanel.resultDetails", "Result details")}</span>
                           {isStatsResultOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                         </CollapsibleTrigger>
                         <CollapsibleContent className="mt-1 space-y-1">
@@ -864,14 +939,14 @@ function SelectedPolygonInfoPanel({
           <Collapsible open={isChmStatsOpen} onOpenChange={setIsChmStatsOpen}>
             <div className="mt-2 rounded-md border border-cyan-200/70 bg-white/75 text-xs text-cyan-950">
               <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left">
-                <span className="font-semibold text-cyan-900/80">CHM stats</span>
+                <span className="font-semibold text-cyan-900/80">{t("selectedPanel.chmStats", "CHM stats")}</span>
                 {isChmStatsOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
               </CollapsibleTrigger>
               <CollapsibleContent className="px-2 pb-1.5">
                 {!hasPrecomputedChmStats ? (
                   <>
                     {!isPolygonSelection ? (
-                      <div className="mt-1 text-xs text-amber-700">CHM stats only runs on polygon selections.</div>
+                      <div className="mt-1 text-xs text-amber-700">{t("selectedPanel.chmOnlyPolygon", "CHM stats only runs on polygon selections.")}</div>
                     ) : null}
 
                     <div className="mt-2 flex items-center gap-2">
@@ -901,7 +976,7 @@ function SelectedPolygonInfoPanel({
                   </>
                 ) : (
                   <div className="mt-1 rounded-md border border-cyan-200/70 bg-cyan-50 px-2 py-1 text-xs text-cyan-900/80">
-                    {"CHM stats are loaded from this polygon's GeoJSON properties."}
+                    {t("selectedPanel.chmStatsLoadedFromGeoJson", "CHM stats are loaded from this polygon's GeoJSON properties.")}
                   </div>
                 )}
 
@@ -949,7 +1024,7 @@ function SelectedPolygonInfoPanel({
                       <div className="rounded-md border border-cyan-200/70 bg-cyan-50/80 px-2 py-1.5">
                         <Collapsible open={isChmStatsResultOpen} onOpenChange={setIsChmStatsResultOpen}>
                           <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 text-left text-xs font-semibold text-cyan-900">
-                            <span>Result details</span>
+                            <span>{t("selectedPanel.resultDetails", "Result details")}</span>
                             {isChmStatsResultOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                           </CollapsibleTrigger>
                           <CollapsibleContent className="mt-1 space-y-1">
@@ -960,7 +1035,7 @@ function SelectedPolygonInfoPanel({
                               </div>
                             ))}
 
-                            <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">Distribution</div>
+                            <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">{t("selectedPanel.distribution", "Distribution")}</div>
                             {chmDistributionRows.map(([label, value]) => (
                               <div key={label} className="flex items-start justify-between gap-2 text-xs">
                                 <span className="text-cyan-900/75">{label}</span>
@@ -968,7 +1043,7 @@ function SelectedPolygonInfoPanel({
                               </div>
                             ))}
 
-                            <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">Coverage</div>
+                            <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">{t("selectedPanel.coverage", "Coverage")}</div>
                             {chmCoverageRows.map(([label, value]) => (
                               <div key={label} className="flex items-start justify-between gap-2 text-xs">
                                 <span className="text-cyan-900/75">{label}</span>
@@ -978,24 +1053,24 @@ function SelectedPolygonInfoPanel({
 
                             {displayedChmStatsResult.canopyCoverByThreshold.length > 0 ? (
                               <div className="mt-2 rounded-md border border-cyan-200/70 bg-white/85 px-2 py-1">
-                                <div className="text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">Canopy Cover Thresholds</div>
+                                <div className="text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">{t("selectedPanel.canopyCoverThresholds", "Canopy Cover Thresholds")}</div>
                                 <div className="mt-1 space-y-1">
                                   {displayedChmStatsResult.canopyCoverByThreshold.map((metric) => (
                                     <div key={metric.thresholdM} className="rounded border border-cyan-100 bg-cyan-50/70 px-2 py-1">
                                       <div className="flex items-start justify-between gap-2 text-xs">
-                                        <span className="text-cyan-900/75">Threshold</span>
+                                        <span className="text-cyan-900/75">{t("selectedPanel.threshold", "Threshold")}</span>
                                         <span className="font-medium">{formatStatsNumber(metric.thresholdM, 2)} m</span>
                                       </div>
                                       <div className="mt-0.5 flex items-start justify-between gap-2 text-xs">
-                                        <span className="text-cyan-900/75">Cover ratio</span>
+                                        <span className="text-cyan-900/75">{t("selectedPanel.coverRatio", "Cover ratio")}</span>
                                         <span className="font-medium">{formatStatsNumber(metric.coverRatio, 4)}</span>
                                       </div>
                                       <div className="mt-0.5 flex items-start justify-between gap-2 text-xs">
-                                        <span className="text-cyan-900/75">Cover percent</span>
+                                        <span className="text-cyan-900/75">{t("selectedPanel.coverPercent", "Cover percent")}</span>
                                         <span className="font-medium">{formatStatsNumber(metric.coverPercent, 2)}%</span>
                                       </div>
                                       <div className="mt-0.5 flex items-start justify-between gap-2 text-xs">
-                                        <span className="text-cyan-900/75">Cover area</span>
+                                        <span className="text-cyan-900/75">{t("selectedPanel.coverArea", "Cover area")}</span>
                                         <span className="font-medium">{formatStatsNumber(metric.coverAreaHa, 2)} ha</span>
                                       </div>
                                     </div>
@@ -1010,7 +1085,7 @@ function SelectedPolygonInfoPanel({
                           <Collapsible open={isChmStatsMetadataOpen} onOpenChange={setIsChmStatsMetadataOpen}>
                             <div className="mt-1 rounded-md border border-cyan-200/70 bg-white/85 px-2 py-1">
                               <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 text-left">
-                                <div className="text-xs font-semibold uppercase tracking-wide text-cyan-900/70">Metadata</div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-cyan-900/70">{t("selectedPanel.metadata", "Metadata")}</div>
                                 {isChmStatsMetadataOpen ? <ChevronDown className="size-3.5 text-cyan-900/70" /> : <ChevronRight className="size-3.5 text-cyan-900/70" />}
                               </CollapsibleTrigger>
                               <CollapsibleContent>
@@ -1029,8 +1104,8 @@ function SelectedPolygonInfoPanel({
                 {hasPrecomputedChmStats && displayedChmStatsResult ? (
                   <div className="mt-2 space-y-1">
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-cyan-900/75">Status</span>
-                      <span className="text-right font-medium">Precomputed</span>
+                      <span className="text-cyan-900/75">{t("selectedPanel.status", "Status")}</span>
+                      <span className="text-right font-medium">{t("selectedPanel.precomputed", "Precomputed")}</span>
                     </div>
 
                     <div className="rounded-md border border-cyan-200/70 bg-cyan-50/80 px-2 py-1.5">
@@ -1052,14 +1127,14 @@ function SelectedPolygonInfoPanel({
           <Collapsible open={isAgbStatsOpen} onOpenChange={setIsAgbStatsOpen}>
             <div className="mt-2 rounded-md border border-cyan-200/70 bg-white/75 text-xs text-cyan-950">
               <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left">
-                <span className="font-semibold text-cyan-900/80">AGB stats</span>
+                <span className="font-semibold text-cyan-900/80">{t("selectedPanel.agbStats", "AGB stats")}</span>
                 {isAgbStatsOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
               </CollapsibleTrigger>
               <CollapsibleContent className="px-2 pb-1.5">
                 {!hasPrecomputedAgbStats ? (
                   <>
                     {!isPolygonSelection ? (
-                      <div className="mt-1 text-xs text-amber-700">AGB stats only runs on polygon selections.</div>
+                      <div className="mt-1 text-xs text-amber-700">{t("selectedPanel.agbOnlyPolygon", "AGB stats only runs on polygon selections.")}</div>
                     ) : null}
 
                     <div className="mt-2 flex items-center gap-2">
@@ -1089,7 +1164,7 @@ function SelectedPolygonInfoPanel({
                   </>
                 ) : (
                   <div className="mt-1 rounded-md border border-cyan-200/70 bg-cyan-50 px-2 py-1 text-xs text-cyan-900/80">
-                    {"AGB stats are loaded from this polygon's GeoJSON properties."}
+                    {t("selectedPanel.agbStatsLoadedFromGeoJson", "AGB stats are loaded from this polygon's GeoJSON properties.")}
                   </div>
                 )}
 
@@ -1099,11 +1174,11 @@ function SelectedPolygonInfoPanel({
                       <span className="text-cyan-900/75">Status</span>
                       <span className="text-right font-medium">
                         {agbStatsJob.error
-                          ? "Failed"
+                          ? t("selectedPanel.failed", "Failed")
                           : agbStatsJob.status === "idle"
-                            ? "Ready"
+                            ? t("selectedPanel.ready", "Ready")
                             : agbStatsJob.status === "partial_success"
-                              ? "Partial success"
+                              ? t("selectedPanel.partialSuccess", "Partial success")
                               : agbStatsJob.status}
                       </span>
                     </div>
@@ -1114,13 +1189,13 @@ function SelectedPolygonInfoPanel({
 
                     {agbStatsJob.status === "cancelled" ? (
                       <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-amber-800">
-                        AGB stats job was cancelled.
+                        {t("selectedPanel.agbStatsJobCancelled", "AGB stats job was cancelled.")}
                       </div>
                     ) : null}
 
                     {agbStatsJob.status === "partial_success" ? (
                       <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-amber-800">
-                        AGB stats completed with partial results.
+                        {t("selectedPanel.agbStatsPartialResults", "AGB stats completed with partial results.")}
                       </div>
                     ) : null}
 
@@ -1155,7 +1230,7 @@ function SelectedPolygonInfoPanel({
                       <div className="rounded-md border border-cyan-200/70 bg-cyan-50/80 px-2 py-1.5">
                         <Collapsible open={isAgbStatsResultOpen} onOpenChange={setIsAgbStatsResultOpen}>
                           <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 text-left text-xs font-semibold text-cyan-900">
-                            <span>Result details</span>
+                            <span>{t("selectedPanel.resultDetails", "Result details")}</span>
                             {isAgbStatsResultOpen ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                           </CollapsibleTrigger>
                           <CollapsibleContent className="mt-1 space-y-1">
@@ -1166,7 +1241,7 @@ function SelectedPolygonInfoPanel({
                               </div>
                             ))}
 
-                            <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">Distribution</div>
+                            <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">{t("selectedPanel.distribution", "Distribution")}</div>
                             {agbDistributionRows.map(([label, value]) => (
                               <div key={label} className="flex items-start justify-between gap-2 text-xs">
                                 <span className="text-cyan-900/75">{label}</span>
@@ -1174,7 +1249,7 @@ function SelectedPolygonInfoPanel({
                               </div>
                             ))}
 
-                            <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">Change 2000-2025</div>
+                            <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">{t("selectedPanel.change20002025", "Change 2000-2025")}</div>
                             {agbChangeRows.map(([label, value]) => (
                               <div key={label} className="flex items-start justify-between gap-2 text-xs">
                                 <span className="text-cyan-900/75">{label}</span>
@@ -1182,7 +1257,7 @@ function SelectedPolygonInfoPanel({
                               </div>
                             ))}
 
-                            <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">Coverage</div>
+                            <div className="mt-2 text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">{t("selectedPanel.coverage", "Coverage")}</div>
                             {agbCoverageRows.map(([label, value]) => (
                               <div key={label} className="flex items-start justify-between gap-2 text-xs">
                                 <span className="text-cyan-900/75">{label}</span>
@@ -1192,24 +1267,24 @@ function SelectedPolygonInfoPanel({
 
                             {displayedAgbStatsResult.agbCoverByThreshold.length > 0 ? (
                               <div className="mt-2 rounded-md border border-cyan-200/70 bg-white/85 px-2 py-1">
-                                <div className="text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">AGB Threshold Coverage</div>
+                                <div className="text-[11px] font-semibold uppercase tracking-wide text-cyan-900/70">{t("selectedPanel.agbThresholdCoverage", "AGB Threshold Coverage")}</div>
                                 <div className="mt-1 space-y-1">
                                   {displayedAgbStatsResult.agbCoverByThreshold.map((metric) => (
                                     <div key={metric.thresholdMgHa} className="rounded border border-cyan-100 bg-cyan-50/70 px-2 py-1">
                                       <div className="flex items-start justify-between gap-2 text-xs">
-                                        <span className="text-cyan-900/75">Threshold</span>
+                                        <span className="text-cyan-900/75">{t("selectedPanel.threshold", "Threshold")}</span>
                                         <span className="font-medium">{formatStatsNumber(metric.thresholdMgHa, 2)} Mg/ha</span>
                                       </div>
                                       <div className="mt-0.5 flex items-start justify-between gap-2 text-xs">
-                                        <span className="text-cyan-900/75">Cover ratio</span>
+                                        <span className="text-cyan-900/75">{t("selectedPanel.coverRatio", "Cover ratio")}</span>
                                         <span className="font-medium">{formatStatsNumber(metric.coverRatio, 4)}</span>
                                       </div>
                                       <div className="mt-0.5 flex items-start justify-between gap-2 text-xs">
-                                        <span className="text-cyan-900/75">Cover percent</span>
+                                        <span className="text-cyan-900/75">{t("selectedPanel.coverPercent", "Cover percent")}</span>
                                         <span className="font-medium">{formatStatsNumber(metric.coverPercent, 2)}%</span>
                                       </div>
                                       <div className="mt-0.5 flex items-start justify-between gap-2 text-xs">
-                                        <span className="text-cyan-900/75">Cover area</span>
+                                        <span className="text-cyan-900/75">{t("selectedPanel.coverArea", "Cover area")}</span>
                                         <span className="font-medium">{formatStatsNumber(metric.coverAreaHa, 2)} ha</span>
                                       </div>
                                     </div>
@@ -1224,7 +1299,7 @@ function SelectedPolygonInfoPanel({
                           <Collapsible open={isAgbStatsMetadataOpen} onOpenChange={setIsAgbStatsMetadataOpen}>
                             <div className="mt-1 rounded-md border border-cyan-200/70 bg-white/85 px-2 py-1">
                               <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 text-left">
-                                <div className="text-xs font-semibold uppercase tracking-wide text-cyan-900/70">Metadata</div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-cyan-900/70">{t("selectedPanel.metadata", "Metadata")}</div>
                                 {isAgbStatsMetadataOpen ? <ChevronDown className="size-3.5 text-cyan-900/70" /> : <ChevronRight className="size-3.5 text-cyan-900/70" />}
                               </CollapsibleTrigger>
                               <CollapsibleContent>
@@ -1243,8 +1318,8 @@ function SelectedPolygonInfoPanel({
                 {hasPrecomputedAgbStats && displayedAgbStatsResult ? (
                   <div className="mt-2 space-y-1">
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-cyan-900/75">Status</span>
-                      <span className="text-right font-medium">Precomputed</span>
+                      <span className="text-cyan-900/75">{t("selectedPanel.status", "Status")}</span>
+                      <span className="text-right font-medium">{t("selectedPanel.precomputed", "Precomputed")}</span>
                     </div>
 
                     <div className="rounded-md border border-cyan-200/70 bg-cyan-50/80 px-2 py-1.5">

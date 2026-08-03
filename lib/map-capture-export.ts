@@ -194,7 +194,11 @@ function drawLayerLegend(
 ): number {
   context.fillStyle = "#0f172a";
   context.font = LEGEND_LAYER_FONT;
-  context.fillText(layer.title, x, y);
+  const bilingualTitle = layer.titleId
+    && layer.titleId.toLowerCase() !== layer.title.toLowerCase()
+    ? `${layer.title} / ${layer.titleId}`
+    : layer.title;
+  context.fillText(bilingualTitle, x, y);
   y += LEGEND_LINE_HEIGHT;
 
   if (layer.kind === "landcover") {

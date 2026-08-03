@@ -11,6 +11,7 @@ import { Fill, Stroke, Style, Circle as CircleStyle } from "ol/style";
 import { createEmpty, extend, isEmpty } from "ol/extent";
 import { Upload } from "lucide-react";
 
+import { useI18n } from "@/components/providers/i18n-provider";
 import { getGroupableColumns } from "@/lib/vector-grouping";
 import { filterVectorFiles, groupFilesByBaseName, parseVectorFile } from "@/lib/vector-import";
 
@@ -56,6 +57,7 @@ const VectorDropzone = forwardRef<VectorDropzoneHandle, VectorDropzoneProps>(fun
   onMessage,
   onVectorLayerAdd,
 }, ref) {
+  const { t } = useI18n();
   const [isDragActive, setIsDragActive] = useState(false);
   const dragDepthRef = useRef(0);
   const layersRef = useRef(new Map<string, VectorLayer<VectorSource>>());
@@ -342,8 +344,8 @@ const VectorDropzone = forwardRef<VectorDropzoneHandle, VectorDropzoneProps>(fun
           <div className="absolute inset-6 grid place-items-center rounded-2xl border-2 border-dashed border-cyan-900/70 bg-cyan-100/70 text-cyan-950">
             <div className="flex flex-col items-center gap-3 p-4 text-center">
               <Upload className="size-8" />
-              <p className="text-sm font-semibold">Drop vector files or a folder to add them on top of landcover</p>
-              <p className="text-xs opacity-80">Supported: .zip, .geojson, .json, .kml, .shp, and folder bundles</p>
+              <p className="text-sm font-semibold">{t("vectorDropzone.dropVectorFilesOverlay", "Drop vector files or a folder to add them on top of landcover")}</p>
+              <p className="text-xs opacity-80">{t("vectorDropzone.supportedFormats", "Supported: .zip, .geojson, .json, .kml, .shp, and folder bundles")}</p>
             </div>
           </div>
         ) : null}

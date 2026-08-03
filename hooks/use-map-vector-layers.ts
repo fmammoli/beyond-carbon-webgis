@@ -483,6 +483,7 @@ export function useMapVectorLayers({
         id: "landcover",
         kind: "landcover",
         title: "Landcover",
+        titleId: "Tutupan Lahan",
       });
     }
 
@@ -491,6 +492,7 @@ export function useMapVectorLayers({
         id: "agb",
         kind: "agb",
         title: "Above Ground Biomass",
+        titleId: "Biomassa Atas Permukaan",
       });
     }
 
@@ -499,6 +501,7 @@ export function useMapVectorLayers({
         id: "chm",
         kind: "chm",
         title: "Canopy Height Model",
+        titleId: "Model Tinggi Kanopi",
       });
     }
 

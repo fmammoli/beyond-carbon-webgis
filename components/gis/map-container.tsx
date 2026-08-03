@@ -75,6 +75,7 @@ import {
   downloadBlob,
   getCaptureMapScreenFocusRect,
 } from "@/lib/map-capture-export";
+import { useI18n } from "@/components/providers/i18n-provider";
 
 type MapContextState = {
   map: OLMap | null;
@@ -135,6 +136,21 @@ function formatLayerName(fileName: string): string {
   return words
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(" ");
+}
+
+function translateBuiltInLayerName(
+  englishName: string,
+  translate: (key: string, fallback?: string) => string,
+): string {
+  const builtInNameMap: Record<string, string> = {
+    "Workshop Regions": translate("layerNames.workshopRegions", "Workshop Regions"),
+    "Indonesia Oil Palm Concessions": translate("layerNames.indonesiaOilPalmConcessions", "Indonesia Oil Palm Concessions"),
+    "Indonesia Wood Fiber Concessions": translate("layerNames.indonesiaWoodFiberConcessions", "Indonesia Wood Fiber Concessions"),
+    "Indonesia Wood Pulp Concession": translate("layerNames.indonesiaWoodPulpConcession", "Indonesia Wood Pulp Concession"),
+    "Jkpp Hcs Field Plot": translate("layerNames.jkppHcsFieldPlot", "Jkpp Hcs Field Plot"),
+  };
+
+  return builtInNameMap[englishName] ?? englishName;
 }
 
 function toFiniteNumber(value: unknown): number | null {
@@ -455,6 +471,7 @@ function resolvePrecomputedAgbStatsFromEntries(
 
 
 export default function MapContainer() {
+  const { t } = useI18n();
   const [year, setYear] = useState(DEFAULT_YEAR);
   const [isLandcoverVisible, setIsLandcoverVisible] = useState(false);
   const [landcoverOpacity, setLandcoverOpacity] = useState(DEFAULT_LANDCOVER_OPACITY);
@@ -718,11 +735,11 @@ export default function MapContainer() {
 
   const floatingMessage = useMemo(() => {
     if (missingPmtilesUrl) {
-      return "Set NEXT_PUBLIC_R2_PMTILES_BASE_URL to load annual landcover PMTiles.";
+      return t("status.setPmtilesBaseUrl", "Set NEXT_PUBLIC_R2_PMTILES_BASE_URL to load annual landcover PMTiles.");
     }
 
     return statusMessage;
-  }, [missingPmtilesUrl, statusMessage]);
+  }, [missingPmtilesUrl, statusMessage, t]);
 
   const landcoverRenderMode = "passthrough" as const;
   const agbRenderMode = "passthrough" as const;
@@ -730,46 +747,47 @@ export default function MapContainer() {
 
   const onCaptureMap = useCallback(async () => {
     if (!mapContext.map) {
-      setCaptureMapError("Map is still loading. Try again in a moment.");
+      setCaptureMapError(t("status.mapStillLoading", "Map is still loading. Try again in a moment."));
       return;
     }
 
     if (isThreatMapGenerating || isThreatMapAiming) {
-      setCaptureMapError("Finish Threat Map mode before capturing the map.");
+      setCaptureMapError(t("status.finishThreatMapBeforeCapture", "Finish Threat Map mode before capturing the map."));
       return;
     }
 
     setCaptureMapError(null);
     setIsCaptureMapAiming(true);
-    setStatusMessage("Capture map aiming is active. Pan or zoom, then click Generate.");
+    setStatusMessage(t("status.captureMapAimingActive", "Capture map aiming is active. Pan or zoom, then click Generate."));
   }, [
     isThreatMapAiming,
     isThreatMapGenerating,
     mapContext.map,
+    t,
   ]);
 
   const onCancelCaptureMapAiming = useCallback(() => {
     setIsCaptureMapAiming(false);
     setCaptureMapPixelRect(null);
     setCaptureMapError(null);
-    setStatusMessage("Capture map canceled.");
-  }, []);
+    setStatusMessage(t("status.captureMapCanceled", "Capture map canceled."));
+  }, [t]);
 
   const onGenerateCaptureMap = useCallback(async () => {
     if (!mapContext.map) {
-      setCaptureMapError("Map is still loading. Try again in a moment.");
+      setCaptureMapError(t("status.mapStillLoading", "Map is still loading. Try again in a moment."));
       return;
     }
 
     if (isThreatMapGenerating || isThreatMapAiming) {
-      setCaptureMapError("Finish Threat Map mode before capturing the map.");
+      setCaptureMapError(t("status.finishThreatMapBeforeCapture", "Finish Threat Map mode before capturing the map."));
       return;
     }
 
     const frozenRect = getCaptureMapScreenFocusRect(mapContext.map);
     if (!frozenRect || !frozenRect.fitsViewport) {
-      setCaptureMapError("Capture focus square must fit fully inside the map viewport.");
-      setStatusMessage("Capture map requires the focus square to fit fully in view.");
+      setCaptureMapError(t("status.captureFocusSquareMustFitViewport", "Capture focus square must fit fully inside the map viewport."));
+      setStatusMessage(t("status.captureMapRequiresSquareInView", "Capture map requires the focus square to fit fully in view."));
       return;
     }
 
@@ -785,11 +803,11 @@ export default function MapContainer() {
       downloadBlob(result.blob, result.filename);
       setIsCaptureMapAiming(false);
       setCaptureMapPixelRect(null);
-      setStatusMessage("Map PNG captured with legend.");
+      setStatusMessage(t("status.mapPngCapturedWithLegend", "Map PNG captured with legend."));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to capture map PNG.";
       setCaptureMapError(message);
-      setStatusMessage(`Map capture failed: ${message}`);
+      setStatusMessage(`${t("status.mapCaptureFailed", "Map capture failed")}: ${message}`);
     } finally {
       setIsCapturingMap(false);
     }
@@ -800,6 +818,7 @@ export default function MapContainer() {
     isThreatMapAiming,
     isThreatMapGenerating,
     mapContext.map,
+    t,
     year,
   ]);
 
@@ -845,9 +864,9 @@ export default function MapContainer() {
       clearHoveredForLayer(fileName);
       clearSelectedForLayer(fileName);
 
-      setStatusMessage(`${fileName} removed.`);
+      setStatusMessage(`${fileName} ${t("status.removed", "removed.")}`);
     },
-    [clearHoveredForLayer, clearSelectedForLayer, removeVectorLayer],
+    [clearHoveredForLayer, clearSelectedForLayer, removeVectorLayer, t],
   );
 
   useEffect(() => {
@@ -946,7 +965,7 @@ export default function MapContainer() {
         }
 
         if (workshopFeatures.length > 0) {
-          const workshopLayerName = "Workshop Regions";
+          const workshopLayerName = translateBuiltInLayerName("Workshop Regions", t);
           const workshopLayer = new VectorLayer({
             source: new VectorSource({ features: workshopFeatures }),
             zIndex: WORKSHOP_VECTOR_Z_INDEX,
@@ -998,7 +1017,7 @@ export default function MapContainer() {
           continue;
         }
 
-        const layerName = formatLayerName(builtInLayer.fileName);
+        const layerName = translateBuiltInLayerName(formatLayerName(builtInLayer.fileName), t);
         const layer = new VectorLayer({
           source: new VectorSource({ features }),
           zIndex: builtInLayer.zIndex,
@@ -1029,7 +1048,7 @@ export default function MapContainer() {
       }
 
       if (!isCancelled && loadedLayerCount > 0) {
-        setStatusMessage(`Loaded ${loadedLayerCount} built-in reference layer${loadedLayerCount === 1 ? "" : "s"}.`);
+        setStatusMessage(`${t("status.loaded", "Loaded")} ${loadedLayerCount} ${t(loadedLayerCount === 1 ? "status.builtInReferenceLayer" : "status.builtInReferenceLayers", loadedLayerCount === 1 ? "built-in reference layer" : "built-in reference layers")}.`);
       }
     };
 
@@ -1039,14 +1058,14 @@ export default function MapContainer() {
         return;
       }
 
-      const message = error instanceof Error ? error.message : "Failed to load workshop regions.";
+      const message = error instanceof Error ? error.message : t("status.failedToLoadWorkshopRegions", "Failed to load workshop regions.");
       setStatusMessage(message);
     });
 
     return () => {
       isCancelled = true;
     };
-  }, [mapContext.map, onVectorLayerAdd]);
+  }, [mapContext.map, onVectorLayerAdd, t]);
 
   useLayoutEffect(() => {
     for (const vectorLayerState of Object.values(vectorLayers)) {
@@ -1141,8 +1160,8 @@ export default function MapContainer() {
     resetLandcoverStatsJob();
     resetChmStatsJob();
     resetAgbStatsJob();
-    setLandcoverStatsSelectionUid(null);
-    setChmStatsSelectionUid(null);
+    setLandcoverStatsSelectionUid(selectedPolygonInfo?.selectionUid ?? null);
+    setChmStatsSelectionUid(selectedPolygonInfo?.selectionUid ?? null);
     setAgbStatsSelectionUid(selectedPolygonInfo?.selectionUid ?? null);
   }, [resetAgbStatsJob, resetChmStatsJob, resetLandcoverStatsJob, selectedPolygonInfo?.selectionUid]);
 
@@ -1151,6 +1170,10 @@ export default function MapContainer() {
       !selectedLandcoverStatsCacheKey
       || landcoverStatsJob.status !== "succeeded"
       || !landcoverStatsJob.result
+      || !shouldUseStatsResultForSelection(
+        landcoverStatsSelectionUid,
+        selectedPolygonInfo?.selectionUid ?? null,
+      )
     ) {
       return;
     }
@@ -1170,13 +1193,17 @@ export default function MapContainer() {
         [selectedLandcoverStatsCacheKey]: nextResult,
       };
     });
-  }, [landcoverStatsJob.result, landcoverStatsJob.status, selectedLandcoverStatsCacheKey]);
+  }, [landcoverStatsJob.result, landcoverStatsJob.status, landcoverStatsSelectionUid, selectedLandcoverStatsCacheKey, selectedPolygonInfo?.selectionUid]);
 
   useEffect(() => {
     if (
       !selectedChmStatsCacheKey
       || chmStatsJob.status !== "succeeded"
       || !chmStatsJob.result
+      || !shouldUseStatsResultForSelection(
+        chmStatsSelectionUid,
+        selectedPolygonInfo?.selectionUid ?? null,
+      )
     ) {
       return;
     }
@@ -1196,7 +1223,7 @@ export default function MapContainer() {
         [selectedChmStatsCacheKey]: nextResult,
       };
     });
-  }, [chmStatsJob.result, chmStatsJob.status, selectedChmStatsCacheKey]);
+  }, [chmStatsJob.result, chmStatsJob.status, chmStatsSelectionUid, selectedChmStatsCacheKey, selectedPolygonInfo?.selectionUid]);
 
   useEffect(() => {
     if (
@@ -1244,7 +1271,7 @@ export default function MapContainer() {
       return {
         ...landcoverStatsJob,
         status: "succeeded" as const,
-        message: "Loaded cached stats for this polygon.",
+        message: t("status.loadedCachedStatsForPolygon", "Loaded cached stats for this polygon."),
         result: cachedLandcoverStatsResult,
         error: null,
       };
@@ -1254,7 +1281,7 @@ export default function MapContainer() {
       ...landcoverStatsJob,
       result: shouldReuseLandcoverStats ? landcoverStatsJob.result ?? null : null,
     };
-  }, [cachedLandcoverStatsResult, landcoverStatsJob, landcoverStatsSelectionUid, selectedPolygonInfo]);
+  }, [cachedLandcoverStatsResult, landcoverStatsJob, landcoverStatsSelectionUid, selectedPolygonInfo, t]);
 
   const chmStatsJobView = useMemo(() => {
     const shouldReuseChmStats = shouldUseStatsResultForSelection(
@@ -1272,7 +1299,7 @@ export default function MapContainer() {
       return {
         ...chmStatsJob,
         status: "succeeded" as const,
-        message: "Loaded cached stats for this polygon.",
+        message: t("status.loadedCachedStatsForPolygon", "Loaded cached stats for this polygon."),
         result: cachedChmStatsResult,
         error: null,
       };
@@ -1282,7 +1309,7 @@ export default function MapContainer() {
       ...chmStatsJob,
       result: shouldReuseChmStats ? chmStatsJob.result ?? null : null,
     };
-  }, [cachedChmStatsResult, chmStatsJob, chmStatsSelectionUid, selectedPolygonInfo]);
+  }, [cachedChmStatsResult, chmStatsJob, chmStatsSelectionUid, selectedPolygonInfo, t]);
 
   const agbStatsJobView = useMemo(() => {
     const agbStatsResultMatchesSelection = shouldUseAgbStatsResultForSelection(
@@ -1300,7 +1327,7 @@ export default function MapContainer() {
       return {
         ...agbStatsJob,
         status: "succeeded" as const,
-        message: "Loaded cached stats for this polygon.",
+        message: t("status.loadedCachedStatsForPolygon", "Loaded cached stats for this polygon."),
         result: cachedAgbStatsResult,
         error: null,
       };
@@ -1310,11 +1337,11 @@ export default function MapContainer() {
       ...agbStatsJob,
       result: agbStatsResultMatchesSelection ? agbStatsJob.result ?? null : null,
     };
-  }, [agbStatsJob, agbStatsSelectionUid, cachedAgbStatsResult, selectedPolygonInfo]);
+  }, [agbStatsJob, agbStatsSelectionUid, cachedAgbStatsResult, selectedPolygonInfo, t]);
 
   const onDownloadSelectedPolygonGeoJson = useCallback(() => {
     if (!selectedPolygonInfo?.geometry) {
-      setStatusMessage("No feature geometry selected for download.");
+      setStatusMessage(t("status.noFeatureGeometrySelectedForDownload", "No feature geometry selected for download."));
       return;
     }
 
@@ -1363,38 +1390,38 @@ export default function MapContainer() {
       anchor.remove();
       URL.revokeObjectURL(objectUrl);
 
-      setStatusMessage(`Downloaded ${filename}.`);
+      setStatusMessage(`${t("status.downloaded", "Downloaded")} ${filename}.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to generate GeoJSON download.";
-      setStatusMessage(`Polygon download failed: ${message}`);
+      setStatusMessage(`${t("status.polygonDownloadFailed", "Polygon download failed")}: ${message}`);
     }
-  }, [selectedPolygonInfo]);
+  }, [selectedPolygonInfo, t]);
 
   const onRunLandcoverStats = useCallback(async () => {
     if (!selectedPolygonGeoJson || !selectedPolygonInfo) {
-      setStatusMessage("No polygon geometry selected for landcover stats.");
+      setStatusMessage(t("status.noPolygonGeometryForLandcoverStats", "No polygon geometry selected for landcover stats."));
       return;
     }
 
     if (!selectedPolygonInfo.geometryType?.includes("Polygon")) {
-      setStatusMessage("Landcover stats requires a polygon selection.");
+      setStatusMessage(t("status.landcoverStatsRequiresPolygon", "Landcover stats requires a polygon selection."));
       return;
     }
 
     if (!Number.isInteger(landcoverStatsBaselineYear) || !Number.isInteger(year)) {
-      setStatusMessage("Baseline year and comparison year must be set before running landcover stats.");
+      setStatusMessage(t("status.baselineAndComparisonRequired", "Baseline year and comparison year must be set before running landcover stats."));
       return;
     }
 
     if (landcoverStatsBaselineYear === year) {
-      setStatusMessage("Baseline year must differ from the comparison year.");
+      setStatusMessage(t("status.baselineMustDiffer", "Baseline year must differ from the comparison year."));
       return;
     }
 
     try {
       const selectionUid = selectedPolygonInfo.selectionUid;
       setLandcoverStatsSelectionUid(selectionUid);
-      setStatusMessage(`Queued landcover stats for ${selectedPolygonInfo.layerName}.`);
+      setStatusMessage(`${t("status.queuedLandcoverStatsFor", "Queued landcover stats for")} ${selectedPolygonInfo.layerName}.`);
 
       await landcoverStatsJob.startJob({
         geojson: selectedPolygonGeoJson,
@@ -1402,17 +1429,17 @@ export default function MapContainer() {
         comparisonYear: year,
       });
 
-      setStatusMessage(`Landcover stats ready for ${selectedPolygonInfo.layerName}.`);
+      setStatusMessage(`${t("status.landcoverStatsReadyFor", "Landcover stats ready for")} ${selectedPolygonInfo.layerName}.`);
     } catch (error) {
       const message = formatLandcoverStatsError(error);
-      setStatusMessage(`Landcover stats failed for ${selectedPolygonInfo.layerName}: ${message}`);
+      setStatusMessage(`${t("status.landcoverStatsFailedFor", "Landcover stats failed for")} ${selectedPolygonInfo.layerName}: ${message}`);
     }
-  }, [landcoverStatsBaselineYear, landcoverStatsJob, landcoverStatsResultCache, selectedLandcoverStatsCacheKey, selectedPolygonGeoJson, selectedPolygonInfo, year]);
+  }, [landcoverStatsBaselineYear, landcoverStatsJob, landcoverStatsResultCache, selectedLandcoverStatsCacheKey, selectedPolygonGeoJson, selectedPolygonInfo, t, year]);
 
   const onCancelLandcoverStats = useCallback(() => {
     landcoverStatsJob.cancel();
-    setStatusMessage("Landcover stats request cancelled.");
-  }, [landcoverStatsJob]);
+    setStatusMessage(t("status.landcoverStatsRequestCancelled", "Landcover stats request cancelled."));
+  }, [landcoverStatsJob, t]);
 
   const onRunChmStats = useCallback(async () => {
     if (!selectedPolygonGeoJson || !selectedPolygonInfo) {

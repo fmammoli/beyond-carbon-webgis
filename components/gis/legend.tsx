@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { ChevronDown, ListTree } from "lucide-react";
 
+import { useI18n } from "@/components/providers/i18n-provider";
 import { agbLegend } from "@/lib/agb-legend";
 import { chmLegend } from "@/lib/chm-legend";
 import { MAPBIOMAS_CLASSES } from "@/lib/mapbiomas-colors";
@@ -19,21 +20,25 @@ export type ActiveLegendLayer =
       id: string;
       kind: "landcover";
       title: string;
+      titleId?: string;
     }
   | {
       id: string;
       kind: "agb";
       title: string;
+      titleId?: string;
     }
   | {
       id: string;
       kind: "chm";
       title: string;
+      titleId?: string;
     }
   | {
       id: string;
       kind: "vector";
       title: string;
+      titleId?: string;
       fillOpacity: number;
       baseColor?: string;
       groupingColumn?: string | null;
@@ -90,6 +95,8 @@ function getIndonesianLabel(englishLabel: string): string {
 }
 
 function LandcoverLegendPanel() {
+  const { locale, t } = useI18n();
+
   const groupedClasses = useMemo(() => {
     const grouped = new Map<
       string,
@@ -135,18 +142,18 @@ function LandcoverLegendPanel() {
 
   return (
     <div className="rounded-md border border-slate-200/80 bg-white p-2.5">
-      <div className="mb-2 text-xs font-semibold text-slate-900">Landcover Legend</div>
+      <div className="mb-2 text-xs font-semibold text-slate-900">{t("legend.landcoverLegend", "Landcover Legend")}</div>
       <div className="space-y-1.5">
         {groupedClasses.map((group) => (
           <div key={group.key} className="rounded-md border border-slate-200/80 bg-white p-1.5">
             <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-slate-600">
               <span className="leading-tight">
                 <span className="block font-semibold text-slate-900">
-                  {group.key}.x {group.title.en}
+                  {group.key}.x {locale === "id" ? group.title.id : group.title.en}
                 </span>
-                <span className="block text-[9px]">{group.title.id}</span>
+                {locale === "en" ? <span className="block text-[9px]">{group.title.id}</span> : null}
               </span>
-              <span>{group.items.length} classes</span>
+              <span>{group.items.length} {t("legend.classes", "classes")}</span>
             </div>
             <div className="space-y-1.5">
               {group.items.map((item) => (
@@ -157,10 +164,16 @@ function LandcoverLegendPanel() {
                   />
                   <span className="font-mono text-[10px] text-slate-600">{item.id}</span>
                   <span className="min-w-0 leading-tight">
-                    <span className="block truncate">{getCompactLabel(item.label)}</span>
-                    <span className="block truncate text-[10px] text-slate-600">
-                      {getIndonesianLabel(getCompactLabel(item.label))}
+                    <span className="block truncate">
+                      {locale === "id"
+                        ? getIndonesianLabel(getCompactLabel(item.label))
+                        : getCompactLabel(item.label)}
                     </span>
+                    {locale === "en" ? (
+                      <span className="block truncate text-[10px] text-slate-600">
+                        {getIndonesianLabel(getCompactLabel(item.label))}
+                      </span>
+                    ) : null}
                   </span>
                 </div>
               ))}
@@ -173,12 +186,13 @@ function LandcoverLegendPanel() {
 }
 
 function AgbLegendPanel() {
+  const { t } = useI18n();
   const gradientStops = agbLegend.colors.join(", ");
 
   return (
     <div className="rounded-md border border-slate-200/80 bg-white p-2.5">
       <div className="mb-2 text-sm font-medium tracking-tight text-slate-900">
-        Aboveground Biomass Density (AGB) Mg/ha
+        {t("legend.agbTitle", "Aboveground Biomass Density (AGB) Mg/ha")}
       </div>
       <div
         className="h-10 rounded-sm border border-slate-200/80"
@@ -198,13 +212,14 @@ function AgbLegendPanel() {
 }
 
 function ChmLegendPanel() {
+  const { t } = useI18n();
   const gradientStops = chmLegend.colors.join(", ");
   const chmStopLabels = chmLegend.breaks.map((value) => String(value));
 
   return (
     <div className="rounded-md border border-slate-200/80 bg-white p-2.5">
       <div className="mb-2 text-sm font-medium tracking-tight text-slate-900">
-        Canopy Height Model (m)
+        {t("legend.chmTitle", "Canopy Height Model (m)")}
       </div>
       <div
         className="h-10 rounded-sm border border-slate-200/80"
@@ -232,6 +247,8 @@ function VectorLegendPanel({
   groupingColumn?: string | null;
   groups?: Array<{ value: string; color: string; count: number }>;
 }) {
+  const { locale, t } = useI18n();
+
   return (
     <div className="rounded-md border border-slate-200/80 bg-white p-2.5">
       <div className="mb-2 text-xs font-semibold text-slate-900">{title}</div>
@@ -239,7 +256,7 @@ function VectorLegendPanel({
         {groupingColumn && groups && groups.length > 0 ? (
           <>
             <div className="text-[10px] text-slate-600">
-              Grouped by <span className="font-semibold text-slate-900">{groupingColumn}</span>
+              {locale === "id" ? t("legend.groupedById", "Dikelompokkan berdasarkan") : t("legend.groupedBy", "Grouped by")} <span className="font-semibold text-slate-900">{groupingColumn}</span>
             </div>
             {groups.map((group) => (
               <div key={`${group.value}:${group.color}`} className="flex items-center justify-between gap-2">
@@ -258,7 +275,7 @@ function VectorLegendPanel({
           <>
             <div className="flex items-center gap-2">
               <span className="h-0.5 w-5 rounded" style={{ backgroundColor: baseColor }} />
-              <span>Boundary stroke</span>
+              <span>{t("legend.boundaryStroke", "Boundary stroke")}</span>
             </div>
             <div className="flex items-center gap-2">
               <span
@@ -269,7 +286,7 @@ function VectorLegendPanel({
                   opacity: fillOpacity,
                 }}
               />
-              <span>Polygon fill ({Math.round(fillOpacity * 100)}%)</span>
+              <span>{t("legend.polygonFill", "Polygon fill")} ({Math.round(fillOpacity * 100)}%)</span>
             </div>
           </>
         )}
@@ -279,6 +296,7 @@ function VectorLegendPanel({
 }
 
 export function Legend({ open, onOpenChange, activeLayers }: LegendProps) {
+  const { t } = useI18n();
   const activeLayerCount = activeLayers.length;
 
   return (
@@ -288,14 +306,14 @@ export function Legend({ open, onOpenChange, activeLayers }: LegendProps) {
           <div className="flex items-center justify-between gap-2">
             <CardTitle className="flex items-center gap-2 text-sm font-semibold text-slate-900">
               <ListTree className="size-4" />
-              Layer Legends
+              {t("legend.panelTitle", "Layer Legends")}
             </CardTitle>
             <CollapsibleTrigger
               render={
                 <Button
                   size="icon"
                   variant="outline"
-                  aria-label="Toggle legend"
+                  aria-label={t("legend.toggleLegend", "Toggle legend")}
                   className="size-7 border-slate-200 bg-white text-slate-900 hover:bg-slate-100"
                 />
               }
@@ -309,12 +327,12 @@ export function Legend({ open, onOpenChange, activeLayers }: LegendProps) {
         <CollapsibleContent>
           <CardContent className="max-h-[calc(100dvh-10rem)] space-y-2 overflow-y-auto pb-3 pr-2 pt-0 md:max-h-[calc(100dvh-11rem)]">
             <div className="text-[10px] text-slate-600">
-              Active legend panels: {activeLayerCount}
+              {t("legend.activeLegendPanels", "Active legend panels")}: {activeLayerCount}
             </div>
 
             {activeLayerCount === 0 ? (
               <div className="rounded-md border border-slate-200/80 bg-white p-2 text-[11px] text-slate-700">
-                No visible colorized layers. Turn on a layer to see its legend.
+                {t("legend.noVisibleColorizedLayers", "No visible colorized layers. Turn on a layer to see its legend.")}
               </div>
             ) : (
               activeLayers.map((layer) => {

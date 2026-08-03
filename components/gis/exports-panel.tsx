@@ -2,6 +2,7 @@
 
 import { Camera, Clapperboard } from "lucide-react";
 
+import { useI18n } from "@/components/providers/i18n-provider";
 import { Button } from "@/components/ui/button";
 import type {
   ThreatMapOverlayDiagnostics,
@@ -39,6 +40,7 @@ export function ExportsPanel({
   threatMapError,
   disabled = false,
 }: ExportsPanelProps) {
+  const { t } = useI18n();
   const isThreatMapButtonDisabled = disabled || isThreatMapGenerating || isCapturingMap;
   const isCaptureMapButtonDisabled =
     disabled || isCapturingMap || isThreatMapGenerating || isThreatMapAiming || isCaptureMapAiming;
@@ -54,7 +56,9 @@ export function ExportsPanel({
         onClick={onCaptureMapClick}
       >
         <Camera className="size-4" aria-hidden />
-        {isCapturingMap ? "Capture map (Generating...)" : "Capture map"}
+        {isCapturingMap
+          ? t("exports.captureMapGenerating", "Capture map (Generating...)")
+          : t("exports.captureMap", "Capture map")}
       </Button>
       {isCaptureMapAiming ? (
         <Button
@@ -64,17 +68,17 @@ export function ExportsPanel({
           className="w-full justify-start border-rose-300 text-rose-700 hover:bg-rose-50"
           onClick={onCancelCaptureMapAiming}
         >
-          Cancel capture aiming
+          {t("exports.cancelCaptureAiming", "Cancel capture aiming")}
         </Button>
       ) : null}
       {isCapturingMap ? (
         <div className="rounded-md border border-cyan-200 bg-cyan-50/70 px-3 py-2 text-xs text-cyan-900">
-          Creating focused PNG map with current visible-layer legend...
+          {t("exports.creatingFocusedPng", "Creating focused PNG map with current visible-layer legend...")}
         </div>
       ) : null}
       {isCaptureMapAiming ? (
         <div className="rounded-md border border-cyan-200 bg-cyan-50/70 px-3 py-2 text-xs text-cyan-900">
-          Capture aiming active. Position the square and click Generate from the map overlay.
+          {t("exports.captureAimingActive", "Capture aiming active. Position the square and click Generate from the map overlay.")}
         </div>
       ) : null}
       {captureMapError ? (
@@ -90,7 +94,9 @@ export function ExportsPanel({
         onClick={onThreatMapClick}
       >
         <Clapperboard className="size-4" aria-hidden />
-        {isThreatMapGenerating ? "Threat Map (Processing...)" : "Threat Map"}
+        {isThreatMapGenerating
+          ? t("exports.threatMapProcessing", "Threat Map (Processing...)")
+          : t("exports.threatMap", "Threat Map")}
       </Button>
       {isThreatMapGenerating ? (
         <Button
@@ -100,12 +106,12 @@ export function ExportsPanel({
           className="w-full justify-start border-rose-300 text-rose-700 hover:bg-rose-50"
           onClick={onCancelThreatMapGeneration}
         >
-          Cancel generation
+          {t("exports.cancelGeneration", "Cancel generation")}
         </Button>
       ) : null}
       {isThreatMapAiming ? (
         <div className="rounded-md border border-cyan-200 bg-cyan-50/70 px-3 py-2 text-xs text-cyan-900">
-          Aim the square on the map, then click Generate from the map overlay.
+          {t("exports.threatMapAiming", "Aim the square on the map, then click Generate from the map overlay.")}
         </div>
       ) : null}
       {isThreatMapGenerating && threatMapProgress ? (
@@ -113,23 +119,23 @@ export function ExportsPanel({
           <p className="font-semibold">{threatMapProgress.phaseLabel}</p>
           <p>{threatMapProgress.statusLabel}</p>
           {threatMapProgress.percent !== null ? (
-            <p>Progress: {threatMapProgress.percent}%</p>
+            <p>{t("exports.progress", "Progress")}: {threatMapProgress.percent}%</p>
           ) : null}
           {threatMapProgress.year !== null ? (
-            <p>Year: {threatMapProgress.year}</p>
+            <p>{t("exports.year", "Year")}: {threatMapProgress.year}</p>
           ) : null}
           {threatMapProgress.frameIndex !== null && threatMapProgress.totalFrames !== null ? (
             <p>
-              Frame: {threatMapProgress.frameIndex} / {threatMapProgress.totalFrames}
+              {t("exports.frame", "Frame")}: {threatMapProgress.frameIndex} / {threatMapProgress.totalFrames}
             </p>
           ) : null}
           {threatMapDiagnostics ? (
             <>
               <p className="font-mono text-[11px]">
-                Request/Ready: {threatMapDiagnostics.requestedYear ?? "-"}/{threatMapDiagnostics.readyYear ?? "-"}
+                {t("exports.requestReady", "Request/Ready")}: {threatMapDiagnostics.requestedYear ?? "-"}/{threatMapDiagnostics.readyYear ?? "-"}
               </p>
               <p className="font-mono text-[11px]">
-                Token: {threatMapDiagnostics.resolvedToken}/{threatMapDiagnostics.awaitToken}
+                {t("exports.token", "Token")}: {threatMapDiagnostics.resolvedToken}/{threatMapDiagnostics.awaitToken}
               </p>
             </>
           ) : null}
@@ -141,10 +147,10 @@ export function ExportsPanel({
         </div>
       ) : null}
       <p className="text-xs text-slate-700/90">
-        Click Capture map, aim square, then click Generate for PNG download.
+        {t("exports.captureInstructions", "Click Capture map, aim square, then click Generate for PNG download.")}
       </p>
       <p className="text-xs text-slate-700/90">
-        Click Threat Map, aim the square on map, then click Generate.
+        {t("exports.threatMapInstructions", "Click Threat Map, aim the square on map, then click Generate.")}
       </p>
     </div>
   );

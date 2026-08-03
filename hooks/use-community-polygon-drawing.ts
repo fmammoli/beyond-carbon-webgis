@@ -14,6 +14,8 @@ import VectorSource from "ol/source/Vector";
 import { getArea as getGeodesicArea, getDistance as getGeodesicDistance } from "ol/sphere";
 import { Circle as CircleStyle, Fill, Stroke, Style } from "ol/style";
 
+import { useI18n } from "@/components/providers/i18n-provider";
+
 const DEFAULT_VECTOR_FILL_OPACITY = 0;
 const UPLOADED_VECTOR_Z_INDEX = 2000;
 const DRAW_LAYER_Z_INDEX = 2300;
@@ -186,6 +188,7 @@ export function useCommunityPolygonDrawing({
   onVectorLayerAdd,
   onMessage,
 }: UseCommunityPolygonDrawingParams) {
+  const { t } = useI18n();
   const [isDrawingPolygon, setIsDrawingPolygon] = useState(false);
   const [drawingVertices, setDrawingVertices] = useState<Coordinate[]>([]);
   const [pendingPolygonConfirm, setPendingPolygonConfirm] =
@@ -208,8 +211,8 @@ export function useCommunityPolygonDrawing({
     setPendingPolygonConfirm(null);
     setPendingPointConfirm(null);
     clearDrawingState();
-    onMessage("Polygon drawing canceled.");
-  }, [clearDrawingState, onMessage]);
+    onMessage(t("status.polygonDrawingCanceled", "Polygon drawing canceled."));
+  }, [clearDrawingState, onMessage, t]);
 
   const startDrawing = useCallback(() => {
     setIsDrawingPolygon(true);
@@ -217,13 +220,13 @@ export function useCommunityPolygonDrawing({
     setPendingPointConfirm(null);
     clearDrawingState();
     onMessage(
-      "Drawing started. Click vertices, then click the first vertex to close the polygon.",
+      t("status.drawingStarted", "Drawing started. Click vertices, then click the first vertex to close the polygon."),
     );
-  }, [clearDrawingState, onMessage]);
+  }, [clearDrawingState, onMessage, t]);
 
   const finalizePolygonDrawing = useCallback((vertices: Coordinate[]) => {
     if (vertices.length < 3) {
-      onMessage("At least 3 vertices are required to form a polygon.");
+      onMessage(t("status.atLeastThreeVertices", "At least 3 vertices are required to form a polygon."));
       return;
     }
 
@@ -242,20 +245,18 @@ export function useCommunityPolygonDrawing({
 
     if (metrics.exceedsBufferLimit) {
       const overflowKilometers = metrics.requiredBufferKilometers - metrics.maxAllowedBufferKilometers;
-      onMessage(
-        `${baseMessage} This is too large by ${formatKilometers(overflowKilometers)} km and will be clipped if you confirm.`,
-      );
+      onMessage(`${baseMessage} ${t("status.polygonTooLargeBy", "This is too large by")} ${formatKilometers(overflowKilometers)} km ${t("status.polygonWillBeClipped", "and will be clipped if you confirm.")}`);
     } else {
       onMessage(baseMessage);
     }
-  }, [maxCommunityBoundaryBufferKilometers, maxCommunityBoundaryBufferMeters, onMessage]);
+  }, [maxCommunityBoundaryBufferKilometers, maxCommunityBoundaryBufferMeters, onMessage, t]);
 
   const finalizePointDrawing = useCallback((coordinate: Coordinate) => {
     setPendingPointConfirm({
       coordinate: [...coordinate],
     });
-    onMessage("Point marker detected. Add an optional label and confirm.");
-  }, [onMessage]);
+    onMessage(t("status.pointMarkerDetected", "Point marker detected. Add an optional label and confirm."));
+  }, [onMessage, t]);
 
   const confirmPendingPolygon = useCallback(() => {
     if (!map || !pendingPolygonConfirm) {
@@ -301,19 +302,17 @@ export function useCommunityPolygonDrawing({
       `of ${formatKilometers(metrics.maxAllowedBufferKilometers)} km max.`;
 
     if (metrics.exceedsBufferLimit) {
-      onMessage(
-        `${fileName} added. ${measurementSummary} Your polygon was automatically reduced to the maximum ${formatKilometers(metrics.maxAllowedBufferKilometers)} km square buffer centered on your drawing.`,
-      );
+      onMessage(`${fileName} ${t("status.added", "added.")} ${measurementSummary} ${t("status.polygonAutoReducedPrefix", "Your polygon was automatically reduced to the maximum")} ${formatKilometers(metrics.maxAllowedBufferKilometers)} km ${t("status.polygonAutoReducedSuffix", "square buffer centered on your drawing.")}`);
     } else {
-      onMessage(`${fileName} added. ${measurementSummary}`);
+      onMessage(`${fileName} ${t("status.added", "added.")} ${measurementSummary}`);
     }
-  }, [clearDrawingState, map, maxCommunityBoundaryBufferMeters, onMessage, onVectorLayerAdd, pendingPolygonConfirm]);
+  }, [clearDrawingState, map, maxCommunityBoundaryBufferMeters, onMessage, onVectorLayerAdd, pendingPolygonConfirm, t]);
 
   const discardPendingPolygon = useCallback(() => {
     setPendingPolygonConfirm(null);
     clearDrawingState();
-    onMessage("Polygon discarded. Continue drawing a new polygon.");
-  }, [clearDrawingState, onMessage]);
+    onMessage(t("status.polygonDiscarded", "Polygon discarded. Continue drawing a new polygon."));
+  }, [clearDrawingState, onMessage, t]);
 
   const confirmPendingPoint = useCallback((labelInput: string) => {
     if (!map || !pendingPointConfirm) {
@@ -356,14 +355,14 @@ export function useCommunityPolygonDrawing({
     setPendingPolygonConfirm(null);
     setIsDrawingPolygon(false);
 
-    onMessage(pointLabel ? `${fileName} added.` : "Point marker added.");
-  }, [clearDrawingState, map, onMessage, onVectorLayerAdd, pendingPointConfirm]);
+    onMessage(pointLabel ? `${fileName} ${t("status.added", "added.")}` : t("status.pointMarkerAdded", "Point marker added."));
+  }, [clearDrawingState, map, onMessage, onVectorLayerAdd, pendingPointConfirm, t]);
 
   const discardPendingPoint = useCallback(() => {
     setPendingPointConfirm(null);
     clearDrawingState();
-    onMessage("Point marker discarded. Continue drawing a new feature.");
-  }, [clearDrawingState, onMessage]);
+    onMessage(t("status.pointMarkerDiscarded", "Point marker discarded. Continue drawing a new feature."));
+  }, [clearDrawingState, onMessage, t]);
 
   useEffect(() => {
     drawingVerticesRef.current = drawingVertices;
