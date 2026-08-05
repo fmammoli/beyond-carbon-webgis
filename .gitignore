@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local PMTiles datasets
+/public/agb-pmtiles/
+/public/landcover-pmtiles/

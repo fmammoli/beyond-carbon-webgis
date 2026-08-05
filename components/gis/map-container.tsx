@@ -519,14 +519,40 @@ export default function MapContainer() {
   const resetChmStatsJob = chmStatsJob.reset;
   const resetAgbStatsJob = agbStatsJob.reset;
 
+  const layerMode =
+    process.env.NEXT_PUBLIC_LAYERS_MODE?.toLowerCase() === "remote" ? "remote" : "local";
   const pmtilesBaseUrl =
-    process.env.NEXT_PUBLIC_R2_PMTILES_BASE_URL ?? DEFAULT_R2_PMTILES_BASE_URL;
+    layerMode === "remote"
+      ? process.env.NEXT_PUBLIC_R2_PMTILES_BASE_URL_REMOTE ??
+        process.env.NEXT_PUBLIC_R2_PMTILES_BASE_URL ??
+        DEFAULT_R2_PMTILES_BASE_URL
+      : process.env.NEXT_PUBLIC_R2_PMTILES_BASE_URL_LOCAL ??
+        process.env.NEXT_PUBLIC_R2_PMTILES_BASE_URL ??
+        DEFAULT_R2_PMTILES_BASE_URL;
   const agbPmtilesBaseUrl =
-    process.env.NEXT_PUBLIC_R2_AGB_PMTILES_BASE_URL ?? DEFAULT_R2_AGB_PMTILES_BASE_URL;
+    layerMode === "remote"
+      ? process.env.NEXT_PUBLIC_R2_AGB_PMTILES_BASE_URL_REMOTE ??
+        process.env.NEXT_PUBLIC_R2_AGB_PMTILES_BASE_URL ??
+        DEFAULT_R2_AGB_PMTILES_BASE_URL
+      : process.env.NEXT_PUBLIC_R2_AGB_PMTILES_BASE_URL_LOCAL ??
+        process.env.NEXT_PUBLIC_R2_AGB_PMTILES_BASE_URL ??
+        DEFAULT_R2_AGB_PMTILES_BASE_URL;
   const chmIndonesiaPmtilesUrl =
-    process.env.NEXT_PUBLIC_R2_CHM_PMTILES_URL ?? DEFAULT_R2_CHM_PMTILES_URL;
+    layerMode === "remote"
+      ? process.env.NEXT_PUBLIC_R2_CHM_PMTILES_URL_REMOTE ??
+        process.env.NEXT_PUBLIC_R2_CHM_PMTILES_URL ??
+        DEFAULT_R2_CHM_PMTILES_URL
+      : process.env.NEXT_PUBLIC_R2_CHM_PMTILES_URL_LOCAL ??
+        process.env.NEXT_PUBLIC_R2_CHM_PMTILES_URL ??
+        DEFAULT_R2_CHM_PMTILES_URL;
   const chmKetapangPmtilesUrl =
-    process.env.NEXT_PUBLIC_R2_CHM_KETAPANG_PMTILES_URL ?? DEFAULT_R2_CHM_KETAPANG_PMTILES_URL;
+    layerMode === "remote"
+      ? process.env.NEXT_PUBLIC_R2_CHM_KETAPANG_PMTILES_URL_REMOTE ??
+        process.env.NEXT_PUBLIC_R2_CHM_KETAPANG_PMTILES_URL ??
+        DEFAULT_R2_CHM_KETAPANG_PMTILES_URL
+      : process.env.NEXT_PUBLIC_R2_CHM_KETAPANG_PMTILES_URL_LOCAL ??
+        process.env.NEXT_PUBLIC_R2_CHM_KETAPANG_PMTILES_URL ??
+        DEFAULT_R2_CHM_KETAPANG_PMTILES_URL;
   const missingPmtilesUrl = !pmtilesBaseUrl;
   const activeRasterLayer = isLandcoverVisible
     ? "landcover"

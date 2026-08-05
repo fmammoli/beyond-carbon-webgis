@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-02T20:43:23.705Z",
+  "timestamp": "2026-08-05T05:49:16.370Z",
   "request": {
     "geojson": {
       "type": "FeatureCollection",
@@ -11,24 +11,24 @@
             "coordinates": [
               [
                 [
-                  11158652.343732001,
-                  -53248.392571634206
+                  11166010.60248935,
+                  -24190.23189724993
                 ],
                 [
-                  11178653.237720683,
-                  -53248.392571634206
+                  11186010.799493853,
+                  -24190.23189724993
                 ],
                 [
-                  11178653.237720683,
-                  -73384.23321709054
+                  11186010.799493853,
+                  -44325.370854789944
                 ],
                 [
-                  11158652.343732001,
-                  -73384.23321709054
+                  11166010.60248935,
+                  -44325.370854789944
                 ],
                 [
-                  11158652.343732001,
-                  -53248.392571634206
+                  11166010.60248935,
+                  -24190.23189724993
                 ]
               ]
             ]
@@ -42,8 +42,8 @@
     "geojsonCrs": "EPSG:3857",
     "overlayLayers": [
       {
-        "id": "wilayah-workshop",
-        "label": "Wilayah Workshop",
+        "id": "workshop-regions",
+        "label": "Workshop Regions",
         "geojsonCrs": "EPSG:3857",
         "geojson": {
           "type": "FeatureCollection",
@@ -55,24 +55,24 @@
                 "coordinates": [
                   [
                     [
-                      11158652.343732001,
-                      -53248.392571634206
+                      11166010.60248935,
+                      -24190.23189724993
                     ],
                     [
-                      11158652.343732001,
-                      -73384.23321709054
+                      11166010.60248935,
+                      -44325.370854789944
                     ],
                     [
-                      11178653.237720683,
-                      -73384.23321709054
+                      11186010.799493853,
+                      -44325.370854789944
                     ],
                     [
-                      11178653.237720683,
-                      -53248.392571634206
+                      11186010.799493853,
+                      -24190.23189724993
                     ],
                     [
-                      11158652.343732001,
-                      -53248.392571634206
+                      11166010.60248935,
+                      -24190.23189724993
                     ]
                   ]
                 ]
@@ -100,7 +100,7 @@
                 "comparisonPmtiles": "landcover-processing/landcover-mapbiomas-pmtiles-values/2024_landcover.pmtiles",
                 "workshopRegionName": "Sumatera Barat",
                 "source": "threat-map-overlay",
-                "layerName": "Wilayah Workshop",
+                "layerName": "Workshop Regions",
                 "groupingColumn": null
               }
             }
@@ -114,85 +114,6 @@
         },
         "showInLegend": true,
         "legendOrder": 10
-      },
-      {
-        "id": "community-point-1-djendjend",
-        "label": "Community point 1: djendjend",
-        "geojsonCrs": "EPSG:3857",
-        "geojson": {
-          "type": "Feature",
-          "geometry": {
-            "type": "Point",
-            "coordinates": [
-              11169317.5106283,
-              -61980.75143240603
-            ]
-          },
-          "properties": {
-            "name": "djendjend",
-            "source": "threat-map-overlay",
-            "layerName": "Community point 1: djendjend",
-            "groupingColumn": null
-          }
-        },
-        "style": {
-          "markerColor": "#ff3b30",
-          "markerOutlineColor": "#ffffff",
-          "markerSize": 8,
-          "labelColor": "#111827",
-          "labelBgColor": "#ffffff"
-        },
-        "showInLegend": true,
-        "legendOrder": 20
-      },
-      {
-        "id": "community-polygon-1",
-        "label": "Community polygon 1",
-        "geojsonCrs": "EPSG:3857",
-        "geojson": {
-          "type": "FeatureCollection",
-          "features": [
-            {
-              "type": "Feature",
-              "geometry": {
-                "type": "Polygon",
-                "coordinates": [
-                  [
-                    [
-                      11165977.358420495,
-                      -61784.818335709126
-                    ],
-                    [
-                      11168511.10829644,
-                      -63585.03356038454
-                    ],
-                    [
-                      11171557.488697236,
-                      -60599.84496621205
-                    ],
-                    [
-                      11165977.358420495,
-                      -61784.818335709126
-                    ]
-                  ]
-                ]
-              },
-              "properties": {
-                "source": "threat-map-overlay",
-                "layerName": "Community polygon 1",
-                "groupingColumn": null
-              }
-            }
-          ]
-        },
-        "style": {
-          "strokeColor": "#ff3b30",
-          "strokeWidth": 2,
-          "fillColor": "#ff3b30",
-          "fillOpacity": 0
-        },
-        "showInLegend": true,
-        "legendOrder": 30
       }
     ],
     "preset": "balanced",
