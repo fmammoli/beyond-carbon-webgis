@@ -62,6 +62,17 @@ function assertGeoJsonUploadSize(file: Pick<File, "name" | "size">): void {
   );
 }
 
+function assertKmlUploadSize(file: Pick<File, "name" | "size">): void {
+  if (file.size <= MAX_GEOJSON_UPLOAD_SIZE_BYTES) {
+    return;
+  }
+
+  throw new Error(
+    `KML uploads larger than ${formatByteSize(MAX_GEOJSON_UPLOAD_SIZE_BYTES)} are not supported in the browser uploader. `
+      + `This file is ${formatByteSize(file.size)}. Simplify the file or convert it to GeoJSON or a zipped shapefile bundle instead.`,
+  );
+}
+
 function toFeatureCollection(
   input: FeatureCollection<Geometry, GeoJsonProperties> | AnyFeature,
 ): FeatureCollection<Geometry, GeoJsonProperties> {
@@ -261,6 +272,12 @@ function parseJsonToGeoJson(raw: string): FeatureCollection<Geometry, GeoJsonPro
 
 function parseKmlToGeoJson(raw: string): FeatureCollection<Geometry, GeoJsonProperties> {
   const dom = new DOMParser().parseFromString(raw, "application/xml");
+
+  // DOMParser never throws — a malformed document contains a <parsererror> element instead.
+  if (dom.querySelector("parsererror")) {
+    throw new Error("The KML file contains invalid XML and could not be parsed.");
+  }
+
   const converted = kmlToGeoJson(dom) as FeatureCollection<Geometry, GeoJsonProperties>;
   return transformToTargetCrs(converted);
 }
@@ -332,6 +349,8 @@ export async function parseVectorFile(fileOrFiles: File | File[]): Promise<Parse
     if (!kmlFile) {
       throw new Error("The selected KML file could not be read.");
     }
+
+    assertKmlUploadSize(kmlFile);
 
     const text = await kmlFile.text();
     return {
