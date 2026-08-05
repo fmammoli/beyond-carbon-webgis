@@ -16,10 +16,19 @@ Create an environment file and set your public PMTiles base URL:
 cp .env.example .env.local
 ```
 
+Recommended for deployment (same-origin proxy via Next.js route handlers):
+
 ```bash
-NEXT_PUBLIC_R2_PMTILES_BASE_URL=https://<your-r2-public-url>
-NEXT_PUBLIC_R2_CHM_PMTILES_URL=https://pub-b35b693f4e7a4112af656d6983f8adc2.r2.dev/chm-pmtiles/total_chm.pmtiles
+NEXT_PUBLIC_R2_PMTILES_BASE_URL=/api/pmtiles/landcover-mapbiomas-pmtiles
+NEXT_PUBLIC_R2_AGB_PMTILES_BASE_URL=/api/pmtiles/agb-ctrees-pmtiles
+NEXT_PUBLIC_R2_CHM_PMTILES_URL=/api/pmtiles/chm-pmtiles/total_chm.pmtiles
+
+# Optional override if your public R2 host changes.
+R2_PUBLIC_ORIGIN=https://pub-b35b693f4e7a4112af656d6983f8adc2.r2.dev
 ```
+
+Direct cross-origin URLs are still supported, but proxying through `/api/pmtiles/...`
+avoids most browser CORS/range edge cases in deployed environments.
 
 The app loads yearly archives using this naming convention:
 
@@ -31,6 +40,12 @@ Example:
 
 ```txt
 https://pub-b35b693f4e7a4112af656d6983f8adc2.r2.dev/landcover-mapbiomas-pmtiles/1990_landcover.pmtiles
+```
+
+With the same-origin proxy, the equivalent request path is:
+
+```txt
+/api/pmtiles/landcover-mapbiomas-pmtiles/1990_landcover.pmtiles
 ```
 
 The CHM layer uses one static PMTiles archive URL and does not animate by year.
